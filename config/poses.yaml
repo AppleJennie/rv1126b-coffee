@@ -1,0 +1,53 @@
+# 语义位姿库（TASK 20）：业务层只用位姿名，舵机角度只允许出现在这里
+# StsRobotArm 按此表把语义动作翻译成关节角度。
+#
+# ⚠ 当前 joints 全部是中位占位值（同 projects/coffee_fsm/poses.json），
+#   真机使用前必须用 teach 流程逐个录制（见 docs/modules/coffee_fsm.md）。
+#
+# 字段：
+#   joints:  J1~J5 臂部关节目标位置（0~4095，中位 2048）；J6 夹爪不写在这里
+#   gripper: open / close / hold（hold = 本步不动夹爪）
+#   speed:   运行速度（缺省用 config.json 的 default_speed）
+#   note:    中文备注
+
+HOME:
+  joints: {J1: 2048, J2: 2048, J3: 2048, J4: 2048, J5: 2048}
+  gripper: open
+  speed: 500
+  note: 待机位
+
+CUP:
+  joints: {J1: 2048, J2: 2048, J3: 2048, J4: 2048, J5: 2048}
+  gripper: close
+  speed: 500
+  note: 下抓台面纸杯，夹爪闭合（取杯）
+
+BREWER:
+  joints: {J1: 2048, J2: 2048, J3: 2048, J4: 2048, J5: 2048}
+  gripper: open
+  speed: 500
+  note: 冲泡位（放杯到滴滤机出水口下 / 取成品杯）
+
+WATER:
+  joints: {J1: 2048, J2: 2048, J3: 2048, J4: 2048, J5: 2048}
+  gripper: hold
+  speed: 500
+  note: 热水位（预留）
+
+SERVE:
+  joints: {J1: 2048, J2: 2048, J3: 2048, J4: 2048, J5: 2048}
+  gripper: open
+  speed: 500
+  note: 出餐位（递杯出品，夹爪张开）
+
+GROUNDS_PICK:
+  joints: {J1: 2048, J2: 2048, J3: 2048, J4: 2048, J5: 2048}
+  gripper: close
+  speed: 500
+  note: 取粉杯
+
+GROUNDS_POUR:
+  joints: {J1: 2048, J2: 2048, J3: 2048, J4: 2048, J5: 2900}
+  gripper: hold
+  speed: 300
+  note: 滤篮上方倒粉位（J5 腕旋转到位值，倒粉分步由驱动执行）
