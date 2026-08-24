@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<!--
+  自助咖啡机点单屏原型（单文件，零外部依赖）
+  硬件目标：RV1126B + 10.1 寸竖屏 1080×1920，无 3D GPU（动画克制，不用模糊/粒子/渐变动画）
+  量产版将用 Qt Widgets 重写，故采用统一路由 showPage(name) + 每页成对的 enter/exit 函数，
+  定时器统一登记、切页统一清理，方便一一翻译成 Qt 页面栈与 QTimer 管理。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>畔咖啡 · 自助点单</title>
+<style>
+  /* ============ 全局与配色 ============ */
+  :root {
+    --bg: #FAF6F1;          /* 米白底 */
+    --brown: #4A2C1A;       /* 深棕主色 */
+    --brown-mid: #7A5A42;   /* 次级棕 */
+    --caramel: #D9822B;     /* 焦糖橙点缀 */
+    --card: #FFFFFF;
+    --line: #E8DDD2;
+    --gray: #B9AFA6;
+    --red: #C0392B;
+    --green: #4E7A4E;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #2B2018;   /* 舞台外底色，方便调试时看出屏幕边界 */
+    overflow: hidden;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    color: var(--brown);
+  }
+  /* 缩放舞台：固定 1080×1920，小窗口调试时整体等比缩小居中 */
+  #stage-wrap {
+    position: absolute; left: 50%; top: 50%;
+    transform-origin: center center;
+  }
+  #stage {
+    width: 1080px; height: 1920px;
+    background: var(--bg);
+    position: relative;
+    overflow: hidden;
+  }
+  .page {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column;
+    background: var(--bg);
+  }
+  .page.active { display: flex; }
+
+  /* 页面底部水印 */
+  .watermark {
+    position: absolute; left: 0; right: 0; bottom: 12px;
+    text-align: center; font-size: 20px; color: var(--gray);
+    pointer-events: none; z-index: 50;
+  }
+
+  /* ============ 通用组件 ============ */
+  .btn {
+    border: none; border-radius: 20px;
+    font-weight: bold; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 110px;          /* 触控热区 >= 80px */
+  }
+  .btn-primary { background: var(--brown); color: #FFF6EC; font-size: 44px; }
+  .btn-accent  { background: var(--caramel); color: #FFF; font-size: 44px; }
+  .btn-ghost   { background: #FFF; color: var(--brown); border: 3px solid var(--line); font-size: 40px; }
+  .btn:active  { transform: scale(0.98); }
+
+  /* ============ 1. 待机页 ============ */
+  #page-idle { cursor: pointer; }
+  .ad-slide {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    color: #FFF;
+  }
+  .ad-slide.on { display: flex; }
+  .ad-emoji { font-size: 220px; }
+  .ad-title { font-size: 72px; font-weight: bold; margin-top: 40px; }
+  .ad-sub   { font-size: 36px; margin-top: 24px; opacity: 0.85; }
+  .ad-dots {
+    position: absolute; bottom: 260px; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 20px;
+  }
+  .ad-dot { width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,0.4); }
+  .ad-dot.on { background: #FFF; }
+  .idle-cta {
+    position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,0.95); color: var(--brown);
+    font-size: 48px; font-weight: bold; white-space: nowrap;
+    padding: 36px 90px; border-radius: 999px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    /* 克制的呼吸缩放，无模糊无渐变动画 */
+    animation: ctaPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes ctaPulse { 0%,100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.04); } }
+
+  /* ============ 2. 菜单页 ============ */
+  .menu-header {
+    padding: 36px 48px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand {
+    font-size: 56px; font-weight: bold; color: var(--brown);
+    padding: 12px 8px; /* 扩大长按热区 */
+  }
+  .clock { font-size: 36px; color: var(--brown-mid); font-variant-numeric: tabular-nums; }
+  /* 故障横幅 */
+  .fault-banner {
+    display: none;
+    background: var(--red); color: #FFF;
+    font-size: 36px; font-weight: bold; text-align: center;
+    padding: 22px 0;
+  }
+  .fault-banner.show { display: block; }
+  /* 分类 Tab */
+  .tabs {
+    display: flex; gap: 20px; padding: 16px 48px 8px;
+  }
+  .tab {
+    flex: 1; min-height: 96px;          /* 热区 >= 80px */
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px; font-weight: bold;
+    background: #FFF; color: var(--brown-mid);
+    border: 3px solid var(--line); border-radius: 16px;
+    cursor: pointer;
+  }
+  .tab.on { background: var(--brown); color: #FFF6EC; border-color: var(--brown); }
+  /* 饮品卡片网格 */
+  .menu-grid {
+    flex: 1; overflow-y: auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 28px;
+    padding: 24px 48px 80px;
+    align-content: start;
+  }
+  .drink-card {
+    position: relative;
+    background: var(--card); border-radius: 24px;
+    box-shadow: 0 4px 12px rgba(74,44,26,0.10);
+    padding: 24px; min-height: 360px;    /* 卡片高度 >= 300px */
+    display: flex; flex-direction: column;
+    cursor: pointer;
+  }
+  .drink-card.disabled { filter: grayscale(1); opacity: 0.45; pointer-events: none; }
+  .drink-img {
+    height: 150px; border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 88px; color: #FFF;
+  }
+  .drink-cn { font-size: 40px; font-weight: bold; margin-top: 20px; }  /* 名称 >= 36px */
+  .drink-en { font-size: 26px; color: var(--gray); margin-top: 6px; }
+  .drink-price { font-size: 36px; font-weight: bold; color: var(--caramel); margin-top: auto; padding-top: 14px; } /* 价格 >= 32px */
+  .hot-badge {
+    position: absolute; top: 0; right: 24px;
+    background: var(--caramel); color: #FFF;
+    font-size: 26px; font-weight: bold;
+    padding: 8px 18px; border-radius: 0 0 12px 12px;
+  }
+
+  /* ============ 3. 规格定制页 ============ */
+  .cust-scroll { flex: 1; overflow-y: auto; padding: 32px 48px 24px; }
+  .cust-hero {
+    background: var(--card); border-radius: 24px;
+    box-shadow: 0 4px 12px rgba(74,44,26,0.10);
+    padding: 32px; display: flex; gap: 32px; align-items: center;
+  }
+  .cust-img {
+    width: 220px; height: 220px; border-radius: 20px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 120px; color: #FFF;
+  }
+  .cust-name { font-size: 48px; font-weight: bold; }
+  .cust-en   { font-size: 28px; color: var(--gray); margin-top: 6px; }
+  .cust-desc { font-size: 30px; color: var(--brown-mid); margin-top: 14px; line-height: 1.4; }
+  .opt-group {
+    background: var(--card); border-radius: 24px;
+    box-shadow: 0 4px 12px rgba(74,44,26,0.08);
+    padding: 28px 32px; margin-top: 28px;
+  }
+  .opt-title { font-size: 36px; font-weight: bold; margin-bottom: 20px; }
+  .opt-title .opt-type { font-size: 26px; color: var(--gray); font-weight: normal; margin-left: 14px; }
+  .opt-row { display: flex; flex-wrap: wrap; gap: 20px; }
+  .opt {
+    min-height: 92px; min-width: 200px;   /* 热区 >= 80px */
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 32px;
+    font-size: 34px;
+    background: #F6EFE8; color: var(--brown);
+    border: 3px solid transparent; border-radius: 16px;
+    cursor: pointer;
+  }
+  .opt.on { background: #FDEBD9; border-color: var(--caramel); color: var(--caramel); font-weight: bold; }
+  .opt.off { opacity: 0.35; pointer-events: none; }   /* 禁用并灰显 */
+  .opt .plus { font-size: 28px; margin-left: 10px; color: var(--caramel); }
+  /* 数量步进器 */
+  .qty-row { display: flex; align-items: center; gap: 36px; }
+  .qty-btn {
+    width: 100px; height: 100px; border-radius: 16px; border: none;
+    background: var(--brown); color: #FFF; font-size: 56px; cursor: pointer;
+  }
+  .qty-num { font-size: 52px; font-weight: bold; min-width: 80px; text-align: center; }
+  /* 底部操作条 */
+  .cust-footer {
+    display: flex; gap: 28px; align-items: center;
+    padding: 24px 48px 64px;
+    background: var(--bg);
+    border-top: 2px solid var(--line);
+  }
+  .total-box { flex: 1; }
+  .total-label { font-size: 28px; color: var(--gray); }
+  .total-price { font-size: 56px; font-weight: bold; color: var(--caramel); }
+  .cust-footer .btn { padding: 0 48px; }
+
+  /* ============ 4. 订单确认页 ============ */
+  .confirm-body { flex: 1; overflow-y: auto; padding: 48px; }
+  .page-title { font-size: 52px; font-weight: bold; text-align: center; margin-bottom: 40px; }
+  .confirm-card {
+    background: var(--card); border-radius: 24px;
+    box-shadow: 0 4px 12px rgba(74,44,26,0.10);
+    padding: 40px;
+  }
+  .confirm-drink { display: flex; align-items: center; gap: 28px; padding-bottom: 28px; border-bottom: 2px dashed var(--line); }
+  .confirm-thumb {
+    width: 140px; height: 140px; border-radius: 16px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 72px; color: #FFF;
+  }
+  .confirm-name { font-size: 44px; font-weight: bold; }
+  .confirm-specs { font-size: 30px; color: var(--brown-mid); margin-top: 10px; line-height: 1.5; }
+  .confirm-line {
+    display: flex; justify-content: space-between;
+    font-size: 34px; padding: 20px 0 0;
+  }
+  .confirm-line.grand { font-size: 44px; font-weight: bold; color: var(--caramel); border-top: 2px solid var(--line); margin-top: 20px; padding-top: 28px; }
+  .confirm-footer { padding: 24px 48px 64px; display: flex; gap: 28px; }
+  .confirm-footer .btn { flex: 1; }
+
+  /* ============ 5. 支付页 ============ */
+  .pay-body { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 48px; }
+  .pay-amount { font-size: 88px; font-weight: bold; color: var(--brown); margin: 20px 0 8px; }
+  .pay-hint { font-size: 34px; color: var(--brown-mid); }
+  .qr-box {
+    margin: 56px 0;
+    width: 460px; height: 460px;
+    background: #FFF; border-radius: 24px;
+    box-shadow: 0 6px 16px rgba(74,44,26,0.12);
+    display: grid; padding: 30px; gap: 0;
+  }
+  .qr-cell { background: transparent; }
+  .qr-cell.dark { background: var(--brown); }
+  .pay-count { font-size: 38px; color: var(--red); font-weight: bold; }
+  .pay-footer { padding: 24px 48px 64px; display: flex; flex-direction: column; gap: 24px; }
+
+  /* ============ 6. 制作中页 ============ */
+  .brew-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; }
+  .brew-no-label { font-size: 34px; color: var(--brown-mid); }
+  .brew-no { font-size: 120px; font-weight: bold; color: var(--caramel); letter-spacing: 12px; margin: 10px 0 6px; }
+  .brew-eta { font-size: 34px; color: var(--brown-mid); margin-bottom: 90px; }
+  .brew-steps { display: flex; align-items: flex-start; }
+  .brew-step { display: flex; flex-direction: column; align-items: center; width: 200px; }
+  .brew-dot {
+    width: 110px; height: 110px; border-radius: 50%;
+    background: #EFE6DC; color: var(--gray);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 48px;
+    transition: background 0.3s, transform 0.3s, color 0.3s;  /* 克制的颜色/缩放 */
+  }
+  .brew-step.doing .brew-dot { background: var(--caramel); color: #FFF; transform: scale(1.12); }
+  .brew-step.done  .brew-dot { background: var(--green); color: #FFF; transform: scale(1); }
+  .brew-label { font-size: 34px; margin-top: 20px; color: var(--gray); }
+  .brew-step.doing .brew-label { color: var(--caramel); font-weight: bold; }
+  .brew-step.done  .brew-label { color: var(--green); }
+  .brew-bar { width: 80px; height: 8px; background: #EFE6DC; margin-top: 51px; border-radius: 4px; }
+  .brew-bar.done { background: var(--green); }
+
+  /* ============ 7. 完成页 ============ */
+  #page-done { align-items: center; justify-content: center; text-align: center; }
+  .done-emoji { font-size: 200px; }
+  .done-title { font-size: 72px; font-weight: bold; color: var(--brown); margin-top: 40px; }
+  .done-no { font-size: 48px; color: var(--caramel); font-weight: bold; margin-top: 30px; }
+  .done-hint { font-size: 32px; color: var(--gray); margin-top: 60px; }
+
+  /* ============ 8. 维护面板 ============ */
+  .maint-body { flex: 1; padding: 48px; }
+  .maint-card {
+    background: #FFF8EE; border: 3px dashed var(--caramel); border-radius: 24px;
+    padding: 40px;
+  }
+  .maint-title { font-size: 44px; font-weight: bold; color: var(--caramel); }
+  .maint-tip { font-size: 28px; color: var(--brown-mid); margin-top: 10px; }
+  .maint-states { display: flex; gap: 24px; margin-top: 40px; }
+  .maint-state {
+    flex: 1; min-height: 120px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 38px; font-weight: bold;
+    background: #FFF; border: 3px solid var(--line); border-radius: 18px;
+    cursor: pointer;
+  }
+  .maint-state.on { background: var(--brown); color: #FFF; border-color: var(--brown); }
+  .maint-state.bad.on { background: var(--red); border-color: var(--red); }
+  .maint-footer { padding: 24px 48px 64px; }
+  /* mascot 调试按钮：两列排布，高度沿用 120px（>= 80px 热区规范） */
+  .mascot-debug { flex: 0 0 30%; }
+
+  /* ============ emoji 店员 mascot（纯展示，不可点） ============ */
+  #mascot {
+    position: absolute; top: 24px; right: 250px;   /* 右上角左移，避开菜单页时钟 */
+    z-index: 60; pointer-events: none;              /* 纯展示，不响应触控 */
+    display: flex; flex-direction: row-reverse;     /* 头像在右，气泡在左 */
+    align-items: center; gap: 20px;
+    transition: opacity 0.3s;
+  }
+  #mascot.dim { opacity: 0.55; }                    /* sleep 状态整体稍微半透明 */
+  .mascot-face {
+    width: 120px; height: 120px; border-radius: 50%;
+    background: var(--bg); border: 5px solid var(--brown);   /* 深棕描边米白底 */
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(74,44,26,0.18);
+  }
+  .mascot-emoji { font-size: 64px; animation: mascotBlink 4.2s ease-in-out infinite; }
+  /* 缓慢眨眼：整脸短暂 scaleY 收缩，纯 CSS、低开销 */
+  @keyframes mascotBlink {
+    0%, 90%, 100% { transform: scaleY(1); }
+    94%           { transform: scaleY(0.82); }
+  }
+  .mascot-bubble {
+    max-width: 420px;
+    background: #FFF; color: var(--brown);
+    border: 3px solid var(--line); border-radius: 20px;
+    padding: 18px 26px; font-size: 30px; line-height: 1.4;
+    box-shadow: 0 4px 12px rgba(74,44,26,0.10);
+    opacity: 0; transform: translateX(12px);
+    transition: opacity 0.25s, transform 0.25s;     /* 克制的淡入+滑动，<=300ms */
+  }
+  .mascot-bubble.show { opacity: 1; transform: translateX(0); }
+</style>
+</head>
+<body>
+<div id="stage-wrap">
+  <div id="stage">
+
+    <!-- ============ 1. 待机页 ============ -->
+    <section class="page" id="page-idle">
+      <div class="ad-slide" data-ad="0" style="background:#4A2C1A;">
+        <div class="ad-emoji">☕</div>
+        <div class="ad-title">现磨咖啡 · 新鲜出品</div>
+        <div class="ad-sub">广告位 A · 1080×1920</div>
+      </div>
+      <div class="ad-slide" data-ad="1" style="background:#D9822B;">
+        <div class="ad-emoji">🥐</div>
+        <div class="ad-title">咖啡 + 烘焙 套餐优惠</div>
+        <div class="ad-sub">广告位 B · 1080×1920</div>
+      </div>
+      <div class="ad-slide" data-ad="2" style="background:#6B8F71;">
+        <div class="ad-emoji">🍵</div>
+        <div class="ad-title">会员积分 双倍进行中</div>
+        <div class="ad-sub">广告位 C · 1080×1920</div>
+      </div>
+      <div class="ad-dots">
+        <div class="ad-dot"></div><div class="ad-dot"></div><div class="ad-dot"></div>
+      </div>
+      <div class="idle-cta">点击屏幕开始点单</div>
+    </section>
+
+    <!-- ============ 2. 菜单页 ============ -->
+    <section class="page" id="page-menu">
+      <header class="menu-header">
+        <!-- 长按品牌名 3 秒进入维护面板（隐蔽入口） -->
+        <div class="brand" id="brand">畔咖啡</div>
+        <div class="clock" id="clock">--:--:--</div>
+      </header>
+      <div class="fault-banner" id="fault-banner"></div>
+      <nav class="tabs" id="tabs"></nav>
+      <div class="menu-grid" id="menu-grid"></div>
+    </section>
+
+    <!-- ============ 3. 规格定制页 ============ -->
+    <section class="page" id="page-customize">
+      <div class="cust-scroll" id="cust-scroll"></div>
+      <div class="cust-footer">
+        <div class="total-box">
+          <div class="total-label">合计</div>
+          <div class="total-price" id="cust-total">¥0</div>
+        </div>
+        <button class="btn btn-ghost" id="btn-back-menu">返回菜单</button>
+        <button class="btn btn-accent" id="btn-confirm-order">确认下单</button>
+      </div>
+    </section>
+
+    <!-- ============ 4. 订单确认页 ============ -->
+    <section class="page" id="page-confirm">
+      <div class="confirm-body" id="confirm-body"></div>
+      <div class="confirm-footer">
+        <button class="btn btn-ghost" id="btn-confirm-back">返回修改</button>
+        <button class="btn btn-accent" id="btn-go-pay">去支付</button>
+      </div>
+    </section>
+
+    <!-- ============ 5. 支付页 ============ -->
+    <section class="page" id="page-pay">
+      <div class="pay-body">
+        <div class="page-title" style="margin-bottom:0;">请扫码支付</div>
+        <div class="pay-amount" id="pay-amount">¥0</div>
+        <div class="pay-hint">请使用微信 / 支付宝扫码</div>
+        <div class="qr-box" id="qr-box"></div>
+        <div class="pay-count" id="pay-count">支付剩余 120 秒</div>
+      </div>
+      <div class="pay-footer">
+        <button class="btn btn-accent" id="btn-pay-success">模拟支付成功（演示用）</button>
+        <button class="btn btn-ghost" id="btn-pay-cancel">取消订单</button>
+      </div>
+    </section>
+
+    <!-- ============ 6. 制作中页 ============ -->
+    <section class="page" id="page-brew">
+      <div class="brew-body">
+        <div class="brew-no-label">您的取餐号</div>
+        <div class="brew-no" id="brew-no">---</div>
+        <div class="brew-eta" id="brew-eta">预计等待约 3 分钟</div>
+        <div class="brew-steps" id="brew-steps"></div>
+      </div>
+    </section>
+
+    <!-- ============ 7. 完成页 ============ -->
+    <section class="page" id="page-done">
+      <div class="done-emoji">☕</div>
+      <div class="done-title">请取走您的咖啡</div>
+      <div class="done-no" id="done-no">取餐号 ---</div>
+      <div class="done-hint">5 秒后自动返回首页</div>
+    </section>
+
+    <!-- ============ 8. 维护面板 ============ -->
+    <section class="page" id="page-maint">
+      <div class="maint-body">
+        <div class="page-title">维护面板</div>
+        <div class="maint-card">
+          <div class="maint-title">机器状态模拟</div>
+          <div class="maint-tip">缺水 / 缺豆时，菜单页显示故障横幅并禁止点单</div>
+          <div class="maint-states">
+            <div class="maint-state" data-state="ok">正常</div>
+            <div class="maint-state bad" data-state="nowater">缺水</div>
+            <div class="maint-state bad" data-state="nobeans">缺豆</div>
+          </div>
+        </div>
+        <!-- emoji 店员调试区（原型演示用）：一键切换各 mascot 状态 -->
+        <div class="maint-card" style="margin-top:32px;">
+          <div class="maint-title">emoji 店员状态（原型演示用）</div>
+          <div class="maint-tip">直接切换 mascot 各状态；切页后自动恢复页面默认状态</div>
+          <div class="maint-states" style="flex-wrap:wrap; gap:20px;">
+            <div class="maint-state mascot-debug" data-mascot="sleep">😴 sleep</div>
+            <div class="maint-state mascot-debug" data-mascot="greet">😊 greet</div>
+            <div class="maint-state mascot-debug" data-mascot="recommend">🤔 recommend</div>
+            <div class="maint-state mascot-debug" data-mascot="happy">😄 happy</div>
+            <div class="maint-state mascot-debug" data-mascot="brewing">👨‍🍳 brewing</div>
+            <div class="maint-state mascot-debug" data-mascot="wave">👋 wave</div>
+            <div class="maint-state mascot-debug" data-mascot="fault">😰 fault</div>
+          </div>
+        </div>
+      </div>
+      <div class="maint-footer">
+        <button class="btn btn-primary" id="btn-maint-back" style="width:100%;">返回菜单</button>
+      </div>
+    </section>
+
+    <!-- emoji 店员 mascot：固定右上角（左移避开时钟），状态由 setMascot 驱动，纯展示不可点 -->
+    <div id="mascot">
+      <div class="mascot-face"><span class="mascot-emoji" id="mascot-emoji">😴</span></div>
+      <div class="mascot-bubble" id="mascot-bubble"></div>
+    </div>
+
+    <div class="watermark">原型 Demo</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* =====================================================================
+ * 全局状态
+ * ===================================================================== */
+var MACHINE = { state: 'ok' };          // ok | nowater | nobeans（模拟硬件状态）
+var ORDER = null;                        // 当前订单 { drink, opts, qty, total, pickupNo }
+
+/* =====================================================================
+ * 板端通讯层（kiosk_server.py）
+ * file:// 直接打开 = 演示模式：全部前端模拟，行为与本文件原有逻辑一致；
+ * http(s):// 被板子托管 = 联机模式：菜单/机器状态来自 GET /api/menu 与
+ * SSE /api/events，点「模拟支付成功」改为 POST /api/order 真实下单，
+ * 制作进度由服务端 SSE 事件驱动（不再跑前端假定时器）。
+ * ===================================================================== */
+var API = {
+  live: location.protocol.indexOf('http') === 0,   // 是否由板子托管
+  es: null                                          // 全局 SSE 连接（原生自动重连）
+};
+var brewHandler = null;                // 制作中页注册的进度回调，exit_brew 时清除
+
+function apiGet(path) {
+  return fetch(path).then(function (r) { return r.json(); });
+}
+function apiPost(path, body) {
+  return fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.json(); });
+}
+
+/* SSE 事件统一入口：machine/hello 更新机器状态；progress/done/error 驱动制作页 */
+function handleServerEvent(ev) {
+  if (ev.type === 'hello' || ev.type === 'machine') {
+    MACHINE.state = ev.machine || ev.state || 'ok';
+    if (currentPage === 'menu') refreshFault();
+    return;
+  }
+  if (ev.type === 'progress') {
+    if (brewHandler) brewHandler(ev);
+    return;
+  }
+  if (ev.type === 'done') {
+    if (currentPage === 'brew') showPage('done');
+    return;
+  }
+  if (ev.type === 'error') {                 // 制作失败：提示后回菜单页
+    if (currentPage === 'brew') {
+      setMascot('fault', '制作失败：' + (ev.message || '设备异常'));
+      pageTimeout(function () { showPage('menu'); }, 3000);
+    }
+  }
+}
+
+function apiConnect() {
+  if (!API.live || API.es) return;
+  API.es = new EventSource('/api/events');
+  API.es.onmessage = function (e) {
+    try { handleServerEvent(JSON.parse(e.data)); } catch (err) { /* 忽略坏帧 */ }
+  };
+}
+
+/* =====================================================================
+ * 菜单数据（量产时由后台下发）
+ * ===================================================================== */
+var CATEGORIES = ['全部', '经典咖啡', '奶咖', '特调', '无咖啡因'];
+var MENU = [
+  { id: 1,  cn: '美式',       en: 'Americano',          price: 15, desc: '纯粹浓缩加水，清爽回甘。',     cat: '经典咖啡', hot: true,  iced: true,  emoji: '☕', color: '#6B4226' },
+  { id: 2,  cn: '拿铁',       en: 'Latte',              price: 19, desc: '浓缩与丝滑牛奶的经典平衡。',   cat: '奶咖',     hot: true,  iced: true,  emoji: '🥛', color: '#A67B5B' },
+  { id: 3,  cn: '卡布奇诺',   en: 'Cappuccino',         price: 19, desc: '丰厚奶泡，撒一层可可粉。',     cat: '奶咖',     hot: false, iced: false, emoji: '☕', color: '#8B5E3C' },
+  { id: 4,  cn: '燕麦拿铁',   en: 'Oat Latte',          price: 22, desc: '燕麦奶香，谷物与咖啡的温柔。', cat: '奶咖',     hot: true,  iced: true,  emoji: '🌾', color: '#C9A66B' },
+  { id: 5,  cn: '生椰拿铁',   en: 'Coconut Latte',      price: 23, desc: '生椰乳清甜，热带风味。',       cat: '特调',     hot: true,  iced: true,  emoji: '🥥', color: '#7BA05B' },
+  { id: 6,  cn: '摩卡',       en: 'Mocha',              price: 22, desc: '巧克力与浓缩的浓郁拥抱。',     cat: '特调',     hot: false, iced: true,  emoji: '🍫', color: '#5C3317' },
+  { id: 7,  cn: '焦糖玛奇朵', en: 'Caramel Macchiato',  price: 24, desc: '焦糖淋面，层层香甜。',         cat: '特调',     hot: true,  iced: true,  emoji: '🍮', color: '#B5651D' },
+  { id: 8,  cn: 'Dirty',      en: 'Dirty',              price: 21, desc: '热浓缩撞入冰博客，大口喝。',   cat: '特调',     hot: false, iced: true,  emoji: '🧊', color: '#4E5A65' },
+  { id: 9,  cn: '手冲单品',   en: 'Pour Over',          price: 26, desc: '当季单品豆，花香明亮。',       cat: '经典咖啡', hot: false, iced: false, emoji: '🫖', color: '#704214' },
+  { id: 10, cn: '热巧克力',   en: 'Hot Chocolate',      price: 18, desc: '浓浓可可，不含咖啡因。',       cat: '无咖啡因', hot: false, iced: false, emoji: '🍫', color: '#3B2F2F' },
+  { id: 11, cn: '抹茶拿铁',   en: 'Matcha Latte',       price: 20, desc: '宇治抹茶，清新微苦回甘。',     cat: '无咖啡因', hot: false, iced: true,  emoji: '🍵', color: '#6B8F71' },
+  { id: 12, cn: '蜂蜜柠檬水', en: 'Honey Lemonade',     price: 14, desc: '酸甜清爽，维C满满。',          cat: '无咖啡因', hot: false, iced: true,  emoji: '🍋', color: '#D9A62B' }
+];
+
+/* 规格选项定义（价格增量单位：元） */
+var OPT_DEFS = {
+  cup:    { title: '杯型', type: 'single', items: [ { label: '中杯', plus: 0 }, { label: '大杯', plus: 3 } ] },
+  temp:   { title: '温度', type: 'single', items: [ { label: '热', plus: 0 }, { label: '冰', plus: 0 } ] },
+  sugar:  { title: '糖度', type: 'single', items: [ { label: '正常糖', plus: 0 }, { label: '半糖', plus: 0 }, { label: '无糖', plus: 0 } ] },
+  extras: { title: '加料', type: 'multi',  items: [ { label: '燕麦奶', plus: 2 }, { label: 'extra 浓缩', plus: 3 }, { label: '奶油顶', plus: 2 } ] }
+};
+
+/* =====================================================================
+ * 定时器统一登记与清理
+ * 所有页面内定时器一律通过 addTimer 创建；showPage 切页时 clearAllTimers
+ * 全部清掉，保证离开页面后无任何残留定时器（对应 Qt 的 QTimer 随页面销毁）。
+ * ===================================================================== */
+var activeTimers = [];
+function addTimer(id) { activeTimers.push(id); return id; }
+function pageTimeout(fn, ms)  { return addTimer(setTimeout(fn, ms)); }
+function pageInterval(fn, ms) { return addTimer(setInterval(fn, ms)); }
+function clearAllTimers() {
+  activeTimers.forEach(function (id) { clearTimeout(id); clearInterval(id); });
+  activeTimers = [];
+}
+
+/* 页面级事件监听（如菜单页的重置无操作倒计时、长按维护入口），
+ * 同样随切页统一移除，避免泄漏到其它页面。 */
+var activeListeners = [];
+function pageListen(el, ev, fn, opt) {
+  el.addEventListener(ev, fn, opt);
+  activeListeners.push({ el: el, ev: ev, fn: fn, opt: opt });
+}
+function clearAllListeners() {
+  activeListeners.forEach(function (r) { r.el.removeEventListener(r.ev, r.fn, r.opt); });
+  activeListeners = [];
+}
+
+/* =====================================================================
+ * emoji 店员 mascot
+ * window.setMascot(state, text, autoHideMs)：切换表情与气泡文案。
+ * 气泡自动收起、recommend 延迟显示等定时器一律走 pageTimeout，
+ * 随 showPage 的 clearAllTimers 统一清理，离开页面无残留。
+ * ===================================================================== */
+var MASCOT_STATES = {
+  sleep:     { emoji: '😴', dim: true  },   // 待机页，整体稍微半透明
+  greet:     { emoji: '😊', dim: false },   // 进入菜单页问候
+  recommend: { emoji: '🤔', dim: false },   // 今日推荐 / 思考
+  happy:     { emoji: '😄', dim: false },   // 确认下单 / 支付成功
+  brewing:   { emoji: '👨‍🍳', dim: false },  // 制作中
+  wave:      { emoji: '👋', dim: false },   // 完成页挥手告别
+  fault:     { emoji: '😰', dim: false }    // 缺水 / 缺豆故障
+};
+
+function setMascot(state, text, autoHideMs) {
+  var def = MASCOT_STATES[state];
+  if (!def) return;
+  document.getElementById('mascot-emoji').textContent = def.emoji;
+  document.getElementById('mascot').classList.toggle('dim', def.dim);
+  var bubble = document.getElementById('mascot-bubble');
+  if (text) {
+    bubble.textContent = text;
+    bubble.classList.add('show');
+    if (autoHideMs) {   // 自动收起走页面定时器，切页即清
+      pageTimeout(function () { bubble.classList.remove('show'); }, autoHideMs);
+    }
+  } else {
+    bubble.classList.remove('show');
+  }
+}
+window.setMascot = setMascot;
+
+/* 各页面默认 mascot 状态钩子，showPage 切页后自动调用（文案均为模拟数据） */
+function mascotEnter(name) {
+  switch (name) {
+    case 'idle':
+      setMascot('sleep');
+      break;
+    case 'menu':
+      if (MACHINE.state !== 'ok') {          // 缺水/缺豆故障
+        setMascot('fault', '设备维护中，请稍后再来～');
+        break;
+      }
+      setMascot('greet', '欢迎光临～今天想喝点什么？', 3000);   // 问候气泡 3 秒后收起
+      pageTimeout(function () {              // 5 秒后展示今日推荐，显示 5 秒
+        setMascot('recommend', '今天推荐：生椰拿铁 —— 冰爽治愈', 5000);
+      }, 5000);
+      break;
+    case 'customize':
+      setMascot('recommend', '让我想想…加一份燕麦奶更顺口哦', 5000);
+      break;
+    case 'confirm':
+      setMascot('happy', '好选择！确认一下就去支付吧');
+      break;
+    case 'pay':
+      setMascot('happy', '支付成功马上为您制作～');
+      break;
+    case 'brew':
+      setMascot('brewing', '正在用心制作，请稍候～');
+      break;
+    case 'done':
+      setMascot('wave', '欢迎下次光临！');
+      break;
+    case 'maint':
+      setMascot('recommend', '调试模式（原型演示用）');
+      break;
+  }
+}
+
+/* =====================================================================
+ * 路由：showPage(name) —— 对应 Qt 页面栈的切换
+ * ===================================================================== */
+var PAGES = ['idle', 'menu', 'customize', 'confirm', 'pay', 'brew', 'done', 'maint'];
+var currentPage = null;
+
+function showPage(name) {
+  if (PAGES.indexOf(name) < 0) return;
+  // 1. 退出旧页面：清理其定时器与监听器，执行 exit 钩子
+  clearAllTimers();
+  clearAllListeners();
+  var exitFn = window['exit_' + currentPage];
+  if (typeof exitFn === 'function') exitFn();
+
+  // 2. 切换 DOM 显示
+  PAGES.forEach(function (p) {
+    document.getElementById('page-' + p).classList.toggle('active', p === name);
+  });
+  currentPage = name;
+
+  // 3. 进入新页面：执行 enter 钩子（在其中登记本页定时器/监听器）
+  var enterFn = window['enter_' + name];
+  if (typeof enterFn === 'function') enterFn();
+
+  // 4. mascot 默认状态（其中登记的定时器同属本页，下次切页统一清理）
+  mascotEnter(name);
+}
+
+/* =====================================================================
+ * 舞台缩放：固定 1080×1920，小窗口调试时整体等比缩放居中
+ * ===================================================================== */
+function fitStage() {
+  var scale = Math.min(window.innerWidth / 1080, window.innerHeight / 1920);
+  var wrap = document.getElementById('stage-wrap');
+  wrap.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+}
+window.addEventListener('resize', fitStage);
+
+/* =====================================================================
+ * 1. 待机页：广告轮播 + 点击任意处进入菜单
+ * ===================================================================== */
+var adIndex = 0;
+function showAd(i) {
+  var slides = document.querySelectorAll('#page-idle .ad-slide');
+  var dots = document.querySelectorAll('#page-idle .ad-dot');
+  slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+  dots.forEach(function (d, k) { d.classList.toggle('on', k === i); });
+}
+function enter_idle() {
+  adIndex = 0;
+  showAd(adIndex);
+  // 广告每 4 秒轮播
+  pageInterval(function () {
+    adIndex = (adIndex + 1) % 3;
+    showAd(adIndex);
+  }, 4000);
+  // 点击任意处开始点单
+  pageListen(document.getElementById('page-idle'), 'click', function () {
+    showPage('menu');
+  });
+}
+
+/* =====================================================================
+ * 2. 菜单页：时钟 / 分类过滤 / 卡片渲染 / 60 秒无操作返回 / 长按维护入口
+ * ===================================================================== */
+var currentCat = '全部';
+
+function faultText() {
+  if (MACHINE.state === 'nowater') return '⚠ 设备缺水，暂停点单，请联系工作人员';
+  if (MACHINE.state === 'nobeans') return '⚠ 咖啡豆不足，暂停点单，请联系工作人员';
+  return '';
+}
+
+function renderTabs() {
+  var box = document.getElementById('tabs');
+  box.innerHTML = '';
+  CATEGORIES.forEach(function (c) {
+    var t = document.createElement('div');
+    t.className = 'tab' + (c === currentCat ? ' on' : '');
+    t.textContent = c;
+    t.addEventListener('click', function () {
+      currentCat = c;
+      renderTabs();
+      renderGrid();
+    });
+    box.appendChild(t);
+  });
+}
+
+function renderGrid() {
+  var grid = document.getElementById('menu-grid');
+  var fault = MACHINE.state !== 'ok';
+  grid.innerHTML = '';
+  MENU.filter(function (d) { return currentCat === '全部' || d.cat === currentCat; })
+    .forEach(function (d) {
+      var card = document.createElement('div');
+      card.className = 'drink-card' + (fault ? ' disabled' : '');
+      card.innerHTML =
+        (d.hot ? '<div class="hot-badge">热销</div>' : '') +
+        '<div class="drink-img" style="background:' + d.color + ';">' + d.emoji + '</div>' +
+        '<div class="drink-cn">' + d.cn + '</div>' +
+        '<div class="drink-en">' + d.en + '</div>' +
+        '<div class="drink-price">¥' + d.price + '</div>';
+      if (!fault) {
+        card.addEventListener('click', function () { openCustomize(d); });
+      }
+      grid.appendChild(card);
+    });
+}
+
+/* 60 秒无操作自动返回待机页，任何点击/触摸重置倒计时 */
+var idleResetFn = null;
+function resetIdleTimer() {
+  if (idleResetFn) idleResetFn();          // 清掉旧的（下面用闭包保存 id）
+  var tid = pageTimeout(function () { showPage('idle'); }, 60000);
+  idleResetFn = function () { clearTimeout(tid); };
+}
+
+/* 故障横幅 + 卡片置灰刷新：enter_menu 与 SSE 故障事件共用 */
+function refreshFault() {
+  var banner = document.getElementById('fault-banner');
+  var txt = faultText();
+  banner.textContent = txt;
+  banner.classList.toggle('show', !!txt);
+  renderGrid();
+}
+
+function enter_menu() {
+  // 时钟每秒刷新
+  var clock = document.getElementById('clock');
+  function tick() { clock.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
+  tick();
+  pageInterval(tick, 1000);
+
+  refreshFault();
+
+  renderTabs();
+
+  // 无操作倒计时：任何点击/触摸均重置
+  resetIdleTimer();
+  pageListen(document, 'pointerdown', resetIdleTimer);
+
+  // 隐蔽维护入口：长按品牌名 3 秒
+  var brand = document.getElementById('brand');
+  var pressTid = null;
+  function pressStart() { pressTid = setTimeout(function () { showPage('maint'); }, 3000); }
+  function pressCancel() { if (pressTid) { clearTimeout(pressTid); pressTid = null; } }
+  pageListen(brand, 'pointerdown', pressStart);
+  pageListen(brand, 'pointerup', pressCancel);
+  pageListen(brand, 'pointerleave', pressCancel);
+  pageListen(brand, 'pointermove', pressCancel);
+}
+
+/* =====================================================================
+ * 3. 规格定制页
+ * ===================================================================== */
+function openCustomize(drink) {
+  ORDER = {
+    drink: drink,
+    qty: 1,
+    opts: { cup: 0, temp: 0, sugar: 0, extras: [] }
+    // 温度默认「热」(index 0)；不支持冰的饮品冰选项禁用并灰显
+  };
+  showPage('customize');
+}
+
+function calcTotal() {
+  var d = ORDER.drink, o = ORDER.opts, sum = d.price;
+  sum += OPT_DEFS.cup.items[o.cup].plus;
+  o.extras.forEach(function (i) { sum += OPT_DEFS.extras.items[i].plus; });
+  return sum * ORDER.qty;
+}
+
+function renderCustomize() {
+  var d = ORDER.drink, o = ORDER.opts;
+  var box = document.getElementById('cust-scroll');
+  var html = '';
+  // 饮品信息
+  html += '<div class="cust-hero">' +
+    '<div class="cust-img" style="background:' + d.color + ';">' + d.emoji + '</div>' +
+    '<div><div class="cust-name">' + d.cn + '</div>' +
+    '<div class="cust-en">' + d.en + '</div>' +
+    '<div class="cust-desc">' + d.desc + '</div></div></div>';
+
+  // 各选项组
+  ['cup', 'temp', 'sugar', 'extras'].forEach(function (key) {
+    var def = OPT_DEFS[key];
+    html += '<div class="opt-group"><div class="opt-title">' + def.title +
+      '<span class="opt-type">' + (def.type === 'multi' ? '可多选' : '单选') + '</span></div>' +
+      '<div class="opt-row">';
+    def.items.forEach(function (item, i) {
+      var on = def.type === 'multi' ? o.extras.indexOf(i) >= 0 : o[key] === i;
+      var disabled = (key === 'temp' && i === 1 && !d.iced);   // 不支持冰则禁用并灰显
+      html += '<div class="opt' + (on ? ' on' : '') + (disabled ? ' off' : '') +
+        '" data-group="' + key + '" data-idx="' + i + '">' + item.label +
+        (item.plus ? '<span class="plus">+' + item.plus + ' 元</span>' : '') + '</div>';
+    });
+    html += '</div></div>';
+  });
+
+  // 数量
+  html += '<div class="opt-group"><div class="opt-title">数量</div>' +
+    '<div class="qty-row">' +
+    '<button class="qty-btn" id="qty-minus">−</button>' +
+    '<div class="qty-num" id="qty-num">' + ORDER.qty + '</div>' +
+    '<button class="qty-btn" id="qty-plus">＋</button>' +
+    '</div></div>';
+
+  box.innerHTML = html;
+
+  // 选项点击（事件委托）
+  box.querySelectorAll('.opt').forEach(function (el) {
+    el.addEventListener('click', function () {
+      var g = el.dataset.group, i = parseInt(el.dataset.idx, 10);
+      var def = OPT_DEFS[g];
+      if (def.type === 'multi') {
+        var p = ORDER.opts.extras.indexOf(i);
+        if (p >= 0) ORDER.opts.extras.splice(p, 1); else ORDER.opts.extras.push(i);
+      } else {
+        ORDER.opts[g] = i;
+      }
+      renderCustomize();   // 重绘并刷新总价
+    });
+  });
+  document.getElementById('qty-minus').addEventListener('click', function () {
+    if (ORDER.qty > 1) { ORDER.qty--; renderCustomize(); }
+  });
+  document.getElementById('qty-plus').addEventListener('click', function () {
+    if (ORDER.qty < 9) { ORDER.qty++; renderCustomize(); }
+  });
+
+  document.getElementById('cust-total').textContent = '¥' + calcTotal();
+}
+
+function enter_customize() {
+  renderCustomize();
+  // 底部按钮为静态 DOM，监听随页面进出注册/移除
+  pageListen(document.getElementById('btn-back-menu'), 'click', function () { showPage('menu'); });
+  pageListen(document.getElementById('btn-confirm-order'), 'click', function () {
+    ORDER.total = calcTotal();
+    showPage('confirm');
+  });
+}
+
+/* =====================================================================
+ * 4. 订单确认页
+ * ===================================================================== */
+function specSummary() {
+  var o = ORDER.opts, parts = [];
+  parts.push(OPT_DEFS.cup.items[o.cup].label);
+  parts.push(OPT_DEFS.temp.items[o.temp].label);
+  parts.push(OPT_DEFS.sugar.items[o.sugar].label);
+  if (o.extras.length) {
+    parts.push('加料：' + o.extras.map(function (i) { return OPT_DEFS.extras.items[i].label; }).join('、'));
+  }
+  return parts.join(' / ');
+}
+
+function enter_confirm() {
+  var d = ORDER.drink;
+  var unit = calcTotal() / ORDER.qty;
+  document.getElementById('confirm-body').innerHTML =
+    '<div class="page-title">确认订单</div>' +
+    '<div class="confirm-card">' +
+      '<div class="confirm-drink">' +
+        '<div class="confirm-thumb" style="background:' + d.color + ';">' + d.emoji + '</div>' +
+        '<div><div class="confirm-name">' + d.cn + ' ×' + ORDER.qty + '</div>' +
+        '<div class="confirm-specs">' + specSummary() + '</div></div>' +
+      '</div>' +
+      '<div class="confirm-line"><span>单价</span><span>¥' + unit + '</span></div>' +
+      '<div class="confirm-line"><span>数量</span><span>×' + ORDER.qty + '</span></div>' +
+      '<div class="confirm-line grand"><span>合计</span><span>¥' + ORDER.total + '</span></div>' +
+    '</div>';
+  pageListen(document.getElementById('btn-confirm-back'), 'click', function () { showPage('customize'); });
+  pageListen(document.getElementById('btn-go-pay'), 'click', function () { showPage('pay'); });
+}
+
+/* =====================================================================
+ * 5. 支付页：CSS 二维码 + 120 秒倒计时
+ * ===================================================================== */
+/* 用确定性的伪随机图案画一个「二维码风格」方块矩阵（非真实二维码） */
+function renderQR() {
+  var box = document.getElementById('qr-box');
+  box.innerHTML = '';
+  var N = 21;   // 21×21 模块
+  box.style.gridTemplateColumns = 'repeat(' + N + ', 1fr)';
+  box.style.gridTemplateRows = 'repeat(' + N + ', 1fr)';
+  // 简单 LCG 伪随机，让图案每次一致
+  var seed = 20260101;
+  function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+  // 三个角的定位块（finder pattern）
+  function inFinder(x, y) {
+    return (x < 7 && y < 7) || (x >= N - 7 && y < 7) || (x < 7 && y >= N - 7);
+  }
+  function finderDark(x, y) {
+    var fx = x < 7 ? x : x - (N - 7);
+    var fy = y < 7 ? y : y - (N - 7);
+    if (fx === 0 || fx === 6 || fy === 0 || fy === 6) return true;        // 外框
+    if (fx >= 2 && fx <= 4 && fy >= 2 && fy <= 4) return true;            // 内核
+    return false;
+  }
+  for (var y = 0; y < N; y++) {
+    for (var x = 0; x < N; x++) {
+      var cell = document.createElement('div');
+      var dark = inFinder(x, y) ? finderDark(x, y) : rnd() < 0.42;
+      cell.className = 'qr-cell' + (dark ? ' dark' : '');
+      box.appendChild(cell);
+    }
+  }
+}
+
+function enter_pay() {
+  document.getElementById('pay-amount').textContent = '¥' + ORDER.total;
+  renderQR();
+
+  // 120 秒支付倒计时，超时自动取消订单返回菜单
+  var left = 120;
+  var label = document.getElementById('pay-count');
+  label.textContent = '支付剩余 ' + left + ' 秒';
+  pageInterval(function () {
+    left--;
+    if (left <= 0) {
+      showPage('menu');   // 超时取消
+      return;
+    }
+    label.textContent = '支付剩余 ' + left + ' 秒';
+  }, 1000);
+
+  pageListen(document.getElementById('btn-pay-success'), 'click', function () {
+    if (API.live) {
+      // 联机模式：向板子下单，取餐号由服务端分配
+      apiPost('/api/order', {
+        drink_id: ORDER.drink.id, opts: ORDER.opts, qty: ORDER.qty
+      }).then(function (resp) {
+        if (resp && resp.ok) {
+          ORDER.pickupNo = resp.pickup_no;
+          ORDER.id = resp.order_id;
+          showPage('brew');
+        } else {
+          var reason = resp && resp.reason || '';
+          if (reason.indexOf('machine_') === 0) {   // 下单瞬间机器故障
+            MACHINE.state = reason.replace('machine_', '');
+            showPage('menu');
+          } else {
+            setMascot('fault', '下单失败，请重试');
+          }
+        }
+      }).catch(function () {
+        setMascot('fault', '网络异常，下单未成功');
+      });
+      return;
+    }
+    // 演示模式：生成随机 3 位取餐号
+    ORDER.pickupNo = String(Math.floor(Math.random() * 900) + 100);
+    showPage('brew');
+  });
+  pageListen(document.getElementById('btn-pay-cancel'), 'click', function () { showPage('menu'); });
+}
+
+/* =====================================================================
+ * 6. 制作中页：分步进度（演示模式固定 磨豆→萃取→打奶→完成；
+ *    联机模式步骤由服务端 progress 事件下发，与真实机械臂流程一致）
+ * ===================================================================== */
+var BREW_STEPS = ['磨豆', '萃取', '打奶', '完成'];
+var BREW_ICONS = ['🫘', '☕', '🥛', '✅'];
+var LIVE_STEP_ICONS = { '取杯': '🥤', '磨豆': '🫘', '冲泡': '☕', '萃取': '☕',
+                        '打奶': '🥛', '出品': '✅', '完成': '✅' };
+
+/* 渲染步骤条（names 为步骤名数组，图标按名取，取不到用 ⏳） */
+function renderBrewSteps(names) {
+  var box = document.getElementById('brew-steps');
+  box.innerHTML = '';
+  names.forEach(function (name, i) {
+    if (i > 0) {
+      var bar = document.createElement('div');
+      bar.className = 'brew-bar';
+      bar.id = 'brew-bar-' + i;
+      box.appendChild(bar);
+    }
+    var s = document.createElement('div');
+    s.className = 'brew-step';
+    s.id = 'brew-step-' + i;
+    var icon = (BREW_STEPS[i] === name ? BREW_ICONS[i] : LIVE_STEP_ICONS[name]) || '⏳';
+    s.innerHTML = '<div class="brew-dot">' + icon + '</div>' +
+                  '<div class="brew-label">' + name + '</div>';
+    box.appendChild(s);
+  });
+}
+
+/* 点亮第 i 步：之前全部标记完成，第 i 步标记进行中 */
+function lightStep(i) {
+  var steps = document.querySelectorAll('#brew-steps .brew-step');
+  steps.forEach(function (s, k) {
+    s.classList.toggle('done', k < i);
+    s.classList.toggle('doing', k === i);
+  });
+  for (var b = 1; b < steps.length; b++) {
+    var bar = document.getElementById('brew-bar-' + b);
+    if (bar) bar.classList.toggle('done', b <= i);
+  }
+}
+
+function exit_brew() {
+  brewHandler = null;     // 离开制作页后不再接收进度（SSE 连接本身保持）
+}
+
+function enter_brew() {
+  document.getElementById('brew-no').textContent = ORDER.pickupNo;
+
+  if (API.live) {
+    // 联机模式：等待并消费服务端 progress 事件；done/error 由全局分发处理
+    renderBrewSteps(['等待接单']);
+    document.getElementById('brew-eta').textContent = '已接单，排队制作中…';
+    var rendered = false;
+    brewHandler = function (ev) {
+      if (ORDER.id && ev.order_id !== ORDER.id) return;   // 不是本单（异常兜底）
+      if (!rendered && ev.steps) { renderBrewSteps(ev.steps); rendered = true; }
+      lightStep(ev.step_index);
+      var eta = ev.step_name + '中';
+      if (ev.remain_sec != null) eta += '，剩余约 ' + ev.remain_sec + ' 秒';
+      document.getElementById('brew-eta').textContent = eta;
+    };
+    return;
+  }
+
+  // 演示模式：每步 2 秒，逐个点亮；全部完成后自动进完成页
+  var eta = Math.floor(Math.random() * 3) + 2;   // 预计等待 2~4 分钟
+  document.getElementById('brew-eta').textContent = '预计等待约 ' + eta + ' 分钟';
+  renderBrewSteps(BREW_STEPS);
+  var step = 0;
+  function advance() {
+    if (step >= BREW_STEPS.length) {
+      showPage('done');
+      return;
+    }
+    lightStep(step);
+    step++;
+    pageTimeout(advance, 2000);
+  }
+  advance();
+}
+
+/* =====================================================================
+ * 7. 完成页：5 秒后自动返回待机页
+ * ===================================================================== */
+function enter_done() {
+  document.getElementById('done-no').textContent = '取餐号 ' + ORDER.pickupNo;
+  pageTimeout(function () {
+    ORDER = null;                 // 订单生命周期结束
+    showPage('idle');
+  }, 5000);
+}
+
+/* =====================================================================
+ * 8. 维护面板：切换机器状态
+ * ===================================================================== */
+function enter_maint() {
+  function refresh() {
+    document.querySelectorAll('.maint-state').forEach(function (el) {
+      el.classList.toggle('on', el.dataset.state === MACHINE.state);
+    });
+  }
+  refresh();
+  document.querySelectorAll('.maint-state').forEach(function (el) {
+    pageListen(el, 'click', function () {
+      MACHINE.state = el.dataset.state;
+      refresh();
+      if (API.live) {          // 联机模式：同步到板子（广播给所有屏幕）
+        apiPost('/api/machine', { state: MACHINE.state }).catch(function () {});
+      }
+    });
+  });
+  pageListen(document.getElementById('btn-maint-back'), 'click', function () { showPage('menu'); });
+
+  // mascot 调试按钮（原型演示用）：直接切换状态，附示例气泡，3 秒收起
+  var DEMO_TEXT = {
+    greet: '欢迎光临～', recommend: '今天推荐：生椰拿铁 —— 冰爽治愈',
+    happy: '下单成功！', brewing: '正在用心制作～', wave: '欢迎下次光临！', fault: '设备维护中'
+  };
+  document.querySelectorAll('.mascot-debug').forEach(function (el) {
+    pageListen(el, 'click', function () {
+      var st = el.dataset.mascot;
+      setMascot(st, DEMO_TEXT[st], DEMO_TEXT[st] ? 3000 : 0);
+    });
+  });
+}
+
+/* =====================================================================
+ * 启动：支持 #页面名 hash 直达（调试/截图验证用，如 file:...html#brew）
+ * ===================================================================== */
+fitStage();
+function boot() {
+  var h = location.hash.replace('#', '');
+  if (PAGES.indexOf(h) < 0) { showPage('idle'); return; }
+  // 依赖订单的页面补一份模拟订单，避免空数据报错
+  if (!ORDER && ['customize', 'confirm', 'pay', 'brew', 'done'].indexOf(h) >= 0) {
+    ORDER = { drink: MENU[4], qty: 1, opts: { cup: 0, temp: 0, sugar: 0, extras: [] },
+              total: MENU[4].price, pickupNo: '888' };
+  }
+  showPage(h);
+}
+
+if (API.live) {
+  // 联机模式：先拉菜单与机器状态，连上 SSE，再进页面；失败则回退演示模式
+  apiGet('/api/menu').then(function (data) {
+    if (data && data.menu && data.menu.length) {
+      MENU = data.menu;
+      if (data.categories && data.categories.length) CATEGORIES = data.categories;
+      MACHINE.state = data.machine || 'ok';
+    }
+    apiConnect();
+    boot();
+  }).catch(function () {
+    API.live = false;          // 服务端不可达：回退为纯前端演示
+    boot();
+  });
+} else {
+  boot();
+}
+</script>
+</body>
+</html>

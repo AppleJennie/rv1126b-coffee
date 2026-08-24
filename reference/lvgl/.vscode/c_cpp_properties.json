@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Linux -rk3506",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/opt/atk-dlrk3506-toolchain/arm-buildroot-linux-gnueabihf/sysroot/usr/include"
+            ],
+            "defines": [],
+            "compilerPath": "/opt/atk-dlrk3506-toolchain/bin/arm-buildroot-linux-gnueabihf-gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-gcc-arm",
+            "compilerArgs": [
+            ]
+        }
+    ],
+    "version": 4
+}

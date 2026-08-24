@@ -1,0 +1,18 @@
+{
+  "source": "projects/ui_prototype/coffee_kiosk.html 内嵌 MENU 数据",
+  "categories": ["全部", "经典咖啡", "奶咖", "特调", "无咖啡因"],
+  "drinks": [
+    { "id": 1,  "name": "美式",       "en": "Americano",         "price": 15, "desc": "纯粹浓缩加水，清爽回甘。",     "category": "经典咖啡", "hot": true,  "ice": true,  "emoji": "☕", "color": "#6B4226" },
+    { "id": 2,  "name": "拿铁",       "en": "Latte",             "price": 19, "desc": "浓缩与丝滑牛奶的经典平衡。",   "category": "奶咖",     "hot": true,  "ice": true,  "emoji": "🥛", "color": "#A67B5B" },
+    { "id": 3,  "name": "卡布奇诺",   "en": "Cappuccino",        "price": 19, "desc": "丰厚奶泡，撒一层可可粉。",     "category": "奶咖",     "hot": false, "ice": false, "emoji": "☕", "color": "#8B5E3C" },
+    { "id": 4,  "name": "燕麦拿铁",   "en": "Oat Latte",         "price": 22, "desc": "燕麦奶香，谷物与咖啡的温柔。", "category": "奶咖",     "hot": true,  "ice": true,  "emoji": "🌾", "color": "#C9A66B" },
+    { "id": 5,  "name": "生椰拿铁",   "en": "Coconut Latte",     "price": 23, "desc": "生椰乳清甜，热带风味。",       "category": "特调",     "hot": true,  "ice": true,  "emoji": "🥥", "color": "#7BA05B" },
+    { "id": 6,  "name": "摩卡",       "en": "Mocha",             "price": 22, "desc": "巧克力与浓缩的浓郁拥抱。",     "category": "特调",     "hot": false, "ice": true,  "emoji": "🍫", "color": "#5C3317" },
+    { "id": 7,  "name": "焦糖玛奇朵", "en": "Caramel Macchiato", "price": 24, "desc": "焦糖淋面，层层香甜。",         "category": "特调",     "hot": true,  "ice": true,  "emoji": "🍮", "color": "#B5651D" },
+    { "id": 8,  "name": "Dirty",      "en": "Dirty",             "price": 21, "desc": "热浓缩撞入冰博客，大口喝。",   "category": "特调",     "hot": false, "ice": true,  "emoji": "🧊", "color": "#4E5A65" },
+    { "id": 9,  "name": "手冲单品",   "en": "Pour Over",         "price": 26, "desc": "当季单品豆，花香明亮。",       "category": "经典咖啡", "hot": false, "ice": false, "emoji": "🫖", "color": "#704214" },
+    { "id": 10, "name": "热巧克力",   "en": "Hot Chocolate",     "price": 18, "desc": "浓浓可可，不含咖啡因。",       "category": "无咖啡因", "hot": false, "ice": false, "emoji": "🍫", "color": "#3B2F2F" },
+    { "id": 11, "name": "抹茶拿铁",   "en": "Matcha Latte",      "price": 20, "desc": "宇治抹茶，清新微苦回甘。",     "category": "无咖啡因", "hot": false, "ice": true,  "emoji": "🍵", "color": "#6B8F71" },
+    { "id": 12, "name": "蜂蜜柠檬水", "en": "Honey Lemonade",    "price": 14, "desc": "酸甜清爽，维C满满。",          "category": "无咖啡因", "hot": false, "ice": true,  "emoji": "🍋", "color": "#D9A62B" }
+  ]
+}

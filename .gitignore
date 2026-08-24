@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# C 构建产物（make / gcc 可重现）
+*.o
+projects/servo_bus/servo_tool
+projects/servo_bus/teach_record
+projects/servo_bus/teach_play
+projects/hello_world/hello_aarch64
+
+# 厂商 Qt 参考大文件（约 133M，与本项目代码无关，保留在本地查阅）
+reference/qt_comp/
+reference/qt_basic/
+
+# 暂存区（安装包、与板子互传的临时文件）
+downloads/
+transfer/

@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "main.h": "c",
+        "lvgl.h": "c",
+        "lv_conf.h": "c",
+        "lv_png.h": "c",
+        "typeinfo": "c"
+    }
+}

@@ -1,0 +1,39 @@
+{
+  "serial_port": "/dev/ttyUSB0",
+  "baud_rate": 115200,
+  "joint_ids": {
+    "J1": 1,
+    "J2": 2,
+    "J3": 3,
+    "J4": 4,
+    "J5": 5,
+    "J6": 6
+  },
+  "default_speed": 500,
+  "default_time_ms": 1200,
+  "gripper_open_pos": 1700,
+  "gripper_close_pos": 2400,
+  "position_tolerance": 25,
+  "camera_device": 23,
+  "vision_dir": "../vision",
+  "calib_file": "calib.json",
+  "hough_min_r": 40,
+  "hough_max_r": 200,
+  "hough_param1": 100.0,
+  "hough_param2": 50.0,
+  "cup_ref_x_mm": 150.0,
+  "cup_ref_y_mm": 90.0,
+  "correct_j1_steps_per_mm": 3.0,
+  "correct_j2_steps_per_mm": 2.0,
+  "brew_wait_sec": 180,
+  "simulate_brew_sec": 5,
+  "pour_steps": 3,
+  "pour_speed": 200,
+  "pour_step_time_ms": 800,
+  "actuators": {
+    "grinder": { "type": "wifi", "driver": "tasmota", "host": "192.168.1.61",
+                 "mode": "power", "run_sec": 15 },
+    "brewer":  { "type": "wifi", "driver": "tasmota", "host": "192.168.1.62",
+                 "mode": "press", "press_sec": 1.0 }
+  }
+}
