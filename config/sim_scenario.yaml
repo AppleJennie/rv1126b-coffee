@@ -1,0 +1,40 @@
+# 故障注入场景（TASK 6）
+# 被 hardware/factory.load_scenario() 读取；true=启用，false/缺省=关闭。
+# 只作用于 Sim 设备（真实硬件注入故障有危险，不提供）。
+#
+# 用法：
+#   python3 projects/coffee_fsm/cafe_fsm.py make --drink 1 --scenario config/sim_scenario.yaml
+#   回归测试会逐项启用验证（见 scripts/run_regression.sh）
+
+# 机械臂动作失败（true=在 pick_cup 失败；也可写动作名指定失败点，如 serve）
+robot_arm_fail: false
+
+# 机械臂长期 BUSY 卡死（true=pick_cup 卡死；也可写动作名）
+robot_arm_hang: false
+
+# 机械臂离线（connect 即失败）
+robot_arm_offline: false
+
+# 取杯位无杯（视觉找不到杯子）
+cup_missing: false
+
+# 视觉采帧超时
+vision_timeout: false
+
+# 磨豆机指令无应答
+grinder_timeout: false
+
+# 磨豆机继电器粘连（断电无效，触发最大运行时间保护）
+grinder_stuck_on: false
+
+# 咖啡机（滴滤机）指令无应答
+coffee_machine_timeout: false
+
+# 热水指令无应答
+hot_water_timeout: false
+
+# 全部 WiFi 开关离线（断网）
+wifi_disconnect: false
+
+# 顾客出餐后不取杯（WAIT_CUSTOMER_PICKUP 超时，机械臂收回）
+customer_not_take_cup: false
