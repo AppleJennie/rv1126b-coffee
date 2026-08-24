@@ -1,0 +1,69 @@
+# 饮品配方库（TASK 4）：业务 FSM 按配方执行，禁止在 Python 里 if drink == xxx
+#
+# 键 = 配方名（语义 slug）；match_ids = 对应 menu.json 的 drink id 列表。
+# 找不到匹配时回退 default 指定的配方。
+# 时间为真机秒数；SIM 模式由 hardware 层 time_scale 缩放，配方本身不写模拟值。
+#
+# 字段：
+#   name        中文名（展示用）
+#   match_ids   menu.json drink id 列表
+#   dose_g      咖啡粉量（克；0 = 不用磨豆）
+#   grind_sec   磨豆通电时长
+#   water_ml    水量（展示/计量用，滴滤机自控）
+#   temp_c      目标水温（展示用；真机温控由机器自管）
+#   brew_sec    冲泡等待
+#   arm_sequence 机械臂语义动作序列（hardware.RobotArm 的方法名）
+
+default: demo_drink
+
+recipes:
+
+  americano:
+    name: 美式
+    match_ids: [1]
+    dose_g: 18
+    grind_sec: 15
+    water_ml: 200
+    temp_c: 92
+    brew_sec: 180
+    arm_sequence: [pick_cup, place_cup, pour_grounds, pick_finished_drink, serve]
+
+  double_americano:
+    name: 双份美式
+    match_ids: []
+    dose_g: 36
+    grind_sec: 25
+    water_ml: 300
+    temp_c: 92
+    brew_sec: 200
+    arm_sequence: [pick_cup, place_cup, pour_grounds, pick_finished_drink, serve]
+
+  coffee:
+    name: 经典滴滤
+    match_ids: []
+    dose_g: 20
+    grind_sec: 16
+    water_ml: 250
+    temp_c: 90
+    brew_sec: 180
+    arm_sequence: [pick_cup, place_cup, pour_grounds, pick_finished_drink, serve]
+
+  hot_water:
+    name: 热水
+    match_ids: []
+    dose_g: 0
+    grind_sec: 0
+    water_ml: 250
+    temp_c: 85
+    brew_sec: 30
+    arm_sequence: [pick_cup, place_cup, pick_finished_drink, serve]
+
+  demo_drink:
+    name: 演示饮品（兜底配方）
+    match_ids: []
+    dose_g: 15
+    grind_sec: 10
+    water_ml: 200
+    temp_c: 90
+    brew_sec: 120
+    arm_sequence: [pick_cup, place_cup, pour_grounds, pick_finished_drink, serve]
