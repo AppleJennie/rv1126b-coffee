@@ -15,7 +15,7 @@
 
   ⚠ 重要：models/ 下的 .rknn 是参考工程按 RV1106 目标编译的，**不能直接
   在 RV1126B 上跑**。上板前必须用 rknn-toolkit2 >= 2.3 按
-  target_platform='rv1126b' 重新转换，详见 models/README.md。
+  target_platform='rv1126b' 重新转换，详见 docs/modules/ai_host-models.md。
 
 poll() 返回 dict：
   {present: bool,        # 当前帧是否检测到人脸
@@ -237,7 +237,7 @@ class Landmark106Backend(object):
     """板端 NPU 疲劳后端：RetinaFace 人脸检测 + 2d106det 106 关键点 + FatigueMonitor。
 
     ⚠ models/ 下附带的 .rknn 是按 RV1106 编译的，不能直接在 RV1126B 上跑；
-    上板前需按 RV1126B 重新转换模型（见 models/README.md）。
+    上板前需按 RV1126B 重新转换模型（见 docs/modules/ai_host-models.md）。
 
     推理流程移植自参考工程 hand_capture_right：
       - RetinaFace：整图直接 stretch 缩放到模型输入（C 版未用 letterbox），

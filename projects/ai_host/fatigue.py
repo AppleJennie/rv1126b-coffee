@@ -119,7 +119,7 @@ class FatigueMonitor(object):
                  yawn_ms=1000,              # DMS_YAWN_MS
                  head_down_ms=1500,         # DMS_HEAD_DOWN_MS
                  face_lost_s=1.0,           # C 版写死 1s：超时无人脸复位事件状态
-                 yawn_window_s=60.0,        # 哈欠计数窗口（Python 侧新增，见 README）
+                 yawn_window_s=60.0,        # 哈欠计数窗口（Python 侧新增，见 docs/modules/ai_host.md）
                  yawn_count_tired=3,        # 窗口内哈欠达到此次数视为明显疲劳
                  mild_score=0.3,
                  tired_score=0.6):
@@ -172,7 +172,7 @@ class FatigueMonitor(object):
         """综合评分：闭眼 0.6 权重 + 哈欠 0.3 + 低头 0.3，截断到 0~1。
 
         C 版只输出离散状态（dms_fatigue_logic 的组合判断），连续评分是
-        Python 侧为对接推荐引擎新增的，权重见 README 说明。
+        Python 侧为对接推荐引擎新增的，权重见 docs/modules/ai_host.md 说明。
         """
         eye_prog = 0.0
         if self._eye_enter is not None:

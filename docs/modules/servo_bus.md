@@ -1,5 +1,7 @@
 # STS3215 总线舵机控制工具集
 
+> 代码位置：`projects/servo_bus/`（本文命令均在该目录下执行）
+
 飞特（Feetech）STS 系列总线舵机（STS3215）控制代码，目标平台为 aarch64 Linux
 开发板（正点原子 ATK-DLRV1126B，Buildroot 系统）。所有工具静态链接，scp 到板子
 上即可直接运行，无任何外部依赖（只用 libc/termios）。

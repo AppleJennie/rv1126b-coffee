@@ -518,7 +518,7 @@ def cmd_check(args):
         print(f"-- 标定文件 [OK] {calib_path}")
     else:
         print(f"-- 标定文件 [提示] {calib_path} 不存在，run 前请先标定"
-              f"（见 README：../vision/hand_eye_calib.py）")
+              f"（见 docs/modules/vision.md）")
 
     print(f"===== 自检{'通过' if ok else '未通过'} =====")
     return 0 if ok else 1

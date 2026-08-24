@@ -1,5 +1,7 @@
 # 自主咖啡师（coffee_fsm）
 
+> 代码位置：`projects/coffee_fsm/`（文中 `../vision/`、`../servo_bus/` 等相对路径均基于该目录）
+
 正点原子 ATK-DLRV1126B（Buildroot，Python 3.11 + OpenCV 4.9，纯命令行）上的
 主控程序：6 自由度 STS 总线舵机机械臂 + MIPI 摄像头视觉定位，自动做胶囊/滴滤咖啡。
 

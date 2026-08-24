@@ -1,5 +1,7 @@
 # models/ —— landmark106 疲劳后端模型（留档）
 
+> 对应的模型文件在 `projects/ai_host/models/`（本文从该目录迁入 docs/modules/）。
+
 来源：参考工程 `/mnt/hgfs/hand_capture_right/`（RV1106 驾驶员疲劳监测系统 DMS）。
 
 | 文件 | 说明 |

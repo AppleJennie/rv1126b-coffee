@@ -12,7 +12,7 @@
 #   python3 kiosk_server.py                     # 真机：调用 ../coffee_fsm/fsm.py run
 #   python3 kiosk_server.py --port 8080 --host 0.0.0.0
 #
-# API 一览（详见 docs/WiFi控制与网页通讯设计.md）：
+# API 一览（详见 docs/04-WiFi与网页通讯设计.md）：
 #   GET  /                 -> 点单屏页面
 #   GET  /api/menu         -> {categories, menu, machine}
 #   POST /api/order        -> 请求 {drink_id, opts:{cup,temp,sugar,extras}, qty}

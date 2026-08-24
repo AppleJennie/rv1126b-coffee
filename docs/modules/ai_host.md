@@ -20,7 +20,7 @@ host_fsm.py        互动状态机（主程序，含 simulate / run / recommend 
   ├── recommend.py     规则推荐引擎：recommend(ctx) -> {drink, reason, tags}
   ├── menu.json        菜单数据（提取自 ui_prototype/coffee_kiosk.html 的 MENU）
   ├── voice_manifest.json  语音播报文案清单（key -> 中文文案）
-  └── models/          landmark106 后端模型（留档，RV1126B 上板前需重转，见其 README）
+  └── models/          landmark106 后端模型（留档，RV1126B 上板前需重转，见 docs/modules/ai_host-models.md）
 gen_audio_mac.sh   在 Mac 上用 say + afconvert 批量生成 audio/*.wav
 ```
 
@@ -77,12 +77,12 @@ python3 weather.py
    `python3 /usr/share/ai_host/host_fsm.py run >> /var/log/ai_host.log 2>&1 &`
 6. 疲劳检测：`models/` 下的 `.rknn` 是 RV1106 目标编译的留档文件，
    **上板前必须用 rknn-toolkit2 ≥ 2.3 按 `target_platform='rv1126b'` 重新
-   转换**（见 `models/README.md`）；转换好之前用 haar/scrfd 后端，
+   转换**（见 `docs/modules/ai_host-models.md`）；转换好之前用 haar/scrfd 后端，
    `fatigue` 字段为 None，疲劳相关功能自动关闭。
 
 ## 未决事项
 
-- `models/*.rknn` 需按 RV1126B 重新转换（见 `models/README.md`），
+- `models/*.rknn` 需按 RV1126B 重新转换（见 `docs/modules/ai_host-models.md`），
   retinaface 输入尺寸若非 320 需同步 `Landmark106Backend(det_input_size=...)`。
 - landmark106 后端的 rknnlite 输出假定已反量化为 float32；若实际拿到
   int8 原始输出，需按 zp/scale 手动反量化（板端 bring-up 时核对）。
