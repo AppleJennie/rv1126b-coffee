@@ -74,6 +74,15 @@ run "视觉层 mock 测试" python3 projects/vision/test_vision.py
 # 6c. AI 店员交互状态机 + 规则推荐（15 用例：去重打招呼/制作中不推荐/违禁词扫描）
 run "AI 店员交互+推荐测试" python3 projects/ai_host/test_host_fsm.py
 
+# 6d. 音频事件管理（8 用例：事件映射/降级/缺文件不炸）
+run "AudioManager 测试" python3 projects/ai_host/test_audio_manager.py
+
+# 6e. 机械臂数字孪生（13 用例：动作顺序合法性/超时/急停轨迹中止）
+run "机械臂数字孪生测试" python3 tools/arm_twin/test_arm_twin.py
+
+# 6f. kiosk 产品化（22 断言：watchdog 卡死检测/SQLite 统计聚合/SSE 事件缓冲重放）
+run "kiosk 产品化单测" python3 projects/kiosk_server/test_productization.py
+
 # 7. 机械臂 MCU 协议：CRC/帧解析/模拟串口全链路
 run "机械臂协议自测" python3 projects/servo_bus/mock_robot_serial.py
 
