@@ -1,0 +1,86 @@
+# pip install rknn-toolkit2 实测记录（TASK 14）
+
+- 时间: 2026-08-25T03:54:46+00:00
+- 机器: aarch64, Ubuntu 20.04.5 LTS, python 3.8.10
+- pip: pip 25.0.1 from /home/applejennie/rv1126b/.venv-rknn/lib/python3.8/site-packages/pip (python 3.8)
+- 命令: .venv-rknn/bin/pip install rknn-toolkit2==2.3.2
+
+```
+Looking in indexes: https://pypi.tuna.tsinghua.edu.cn/simple
+Collecting rknn-toolkit2==2.3.2
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/54/bc/c745984872b0843fb32b332428873b1fee6a94596c496eed38b98ca57c62/rknn_toolkit2-2.3.2-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (37.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 37.8/37.8 MB 17.5 MB/s eta 0:00:00
+Collecting protobuf==3.20.3 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/b5/b6/ec87636b9381137f17292851461902ceac7632a00476c2afbcd864ed5447/protobuf-3.20.3-cp38-cp38-manylinux2014_aarch64.whl (918 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 918.6/918.6 kB 18.2 MB/s eta 0:00:00
+Collecting psutil>=5.9.0 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/63/65/37648c0c158dc222aba51c089eb3bdfa238e621674dc42d48706e639204f/psutil-7.2.2-cp36-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (156 kB)
+Collecting ruamel.yaml>=0.17.4 (from rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/0f/73/bb1bc2529f852e7bf64a2dec885e89ff9f5cc7bbf6c9340eed30ff2c69c5/ruamel.yaml-0.18.16-py3-none-any.whl (119 kB)
+Collecting scipy>=1.5.4 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/d2/b5/ff61b79ad0ebd15d87ade10e0f4e80114dd89fac34a5efade39e99048c91/scipy-1.10.1-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (31.0 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 31.0/31.0 MB 10.6 MB/s eta 0:00:00
+Collecting tqdm>=4.64.0 (from rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/f9/1c/01bfd571a64e7f270e6bab5e33777debe0edc56759233ce84f27dec92d14/tqdm-4.70.0-py3-none-any.whl (80 kB)
+Collecting opencv-python>=4.5.5.64 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/93/da/962579f1e703cbf8c5422fd1f576467dcb3b5b0b0b81c1471c979764353a/opencv_python-5.0.0.93-cp37-abi3-manylinux_2_28_aarch64.whl (49.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 49.8/49.8 MB 15.1 MB/s eta 0:00:00
+Collecting fast-histogram>=0.11 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/04/55/645376c6c29c9445920b715c3c5c1e574acbb63e17056d594321468b6b47/fast_histogram-0.13-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (57 kB)
+Collecting numpy<=1.26.4 (from rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/25/6f/2586a50ad72e8dbb1d8381f837008a0321a3516dfd7cb57fc8cf7e4bb06b/numpy-1.24.4-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (14.0 MB)
+Collecting onnx==1.16.1 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/1a/b1/4e6822e70923107425fdadb032aa01fa61cf0abfbfa4a05029a660608bf6/onnx-1.16.1-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (15.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.8/15.8 MB 17.1 MB/s eta 0:00:00
+Collecting onnxoptimizer==0.2.7 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/a3/56/b7c3af61c87d565c4721c6d33b50fcc007c3545b1c5ffd118023ed342197/onnxoptimizer-0.2.7.tar.gz (16.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.8/16.8 MB 12.5 MB/s eta 0:00:00
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting onnxruntime>=1.16.0 (from rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/8d/8a/d014952efa42b6977ea740b47c5c3167535dae02e0c7b1891d49dac5db98/onnxruntime-1.19.2-cp38-cp38-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl (11.5 MB)
+Collecting torch<=2.2.0,>=1.10.1 (from rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/d9/8c/b59182d2561abb769453565744ef0ad6a664dbc8ab11a10567a65f9d8b6e/torch-2.2.0-cp38-cp38-manylinux2014_aarch64.whl (86.6 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 86.6/86.6 MB 15.7 MB/s eta 0:00:00
+Collecting coloredlogs (from onnxruntime>=1.16.0->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/a7/06/3d6badcf13db419e25b07041d9c7b4a2c331d3f4e7134445ec5df57714cd/coloredlogs-15.0.1-py2.py3-none-any.whl (46 kB)
+Collecting flatbuffers (from onnxruntime>=1.16.0->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/e8/2d/d2a548598be01649e2d46231d151a6c56d10b964d94043a335ae56ea2d92/flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+Collecting packaging (from onnxruntime>=1.16.0->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl (100 kB)
+Collecting sympy (from onnxruntime>=1.16.0->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/99/ff/c87e0622b1dadea79d2fb0b25ade9ed98954c9033722eb707053d310d4f3/sympy-1.13.3-py3-none-any.whl (6.2 MB)
+Collecting ruamel.yaml.clib>=0.2.7 (from ruamel.yaml>=0.17.4->rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/5a/45/644d839c09c0717c2d7f26b705560ad74b3056085b3bc7f9c2ac2081317b/ruamel.yaml.clib-0.2.8-cp38-cp38-manylinux_2_24_aarch64.whl (641 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 641.5/641.5 kB 9.6 MB/s eta 0:00:00
+Collecting filelock (from torch<=2.2.0,>=1.10.1->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/b9/f8/feced7779d755758a52d1f6635d990b8d98dc0a29fa568bbe0625f18fdf3/filelock-3.16.1-py3-none-any.whl (16 kB)
+Collecting typing-extensions>=4.8.0 (from torch<=2.2.0,>=1.10.1->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/8b/54/b1ae86c0973cc6f0210b53d508ca3641fb6d0c56823f288d108bc7ab3cc8/typing_extensions-4.13.2-py3-none-any.whl (45 kB)
+Collecting networkx (from torch<=2.2.0,>=1.10.1->rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/a8/05/9d4f9b78ead6b2661d6e8ea772e111fc4a9fbd866ad0c81906c11206b55e/networkx-3.1-py3-none-any.whl (2.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 20.6 MB/s eta 0:00:00
+Collecting jinja2 (from torch<=2.2.0,>=1.10.1->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl (134 kB)
+Collecting fsspec (from torch<=2.2.0,>=1.10.1->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/56/53/eb690efa8513166adef3e0669afd31e95ffde69fb3c52ec2ac7223ed6018/fsspec-2025.3.0-py3-none-any.whl (193 kB)
+Collecting humanfriendly>=9.1 (from coloredlogs->onnxruntime>=1.16.0->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/f0/0f/310fb31e39e2d734ccaa2c0fb981ee41f7bd5056ce9bc29b2248bd569169/humanfriendly-10.0-py2.py3-none-any.whl (86 kB)
+Collecting MarkupSafe>=2.0 (from jinja2->torch<=2.2.0,>=1.10.1->rknn-toolkit2==2.3.2)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/81/d4/fd74714ed30a1dedd0b82427c02fa4deec64f173831ec716da11c51a50aa/MarkupSafe-2.1.5-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (26 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy->onnxruntime>=1.16.0->rknn-toolkit2==2.3.2)
+  Using cached https://pypi.tuna.tsinghua.edu.cn/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl (536 kB)
+Building wheels for collected packages: onnxoptimizer
+  Building wheel for onnxoptimizer (setup.py): started
+  Building wheel for onnxoptimizer (setup.py): still running...
+  Building wheel for onnxoptimizer (setup.py): still running...
+  Building wheel for onnxoptimizer (setup.py): still running...
+  Building wheel for onnxoptimizer (setup.py): still running...
+  Building wheel for onnxoptimizer (setup.py): finished with status 'done'
+  Created wheel for onnxoptimizer: filename=onnxoptimizer-0.2.7-cp38-cp38-linux_aarch64.whl size=461246 sha256=c265dfd43eee79ade5158fa8e726267da2335c4b2c84022ab551f59957e508ae
+  Stored in directory: /home/applejennie/.cache/pip/wheels/82/59/d6/7ff9cd942a9116c8e8a42316be49d2ab0912d1da7aa9be99b3
+Successfully built onnxoptimizer
+Installing collected packages: mpmath, flatbuffers, typing-extensions, tqdm, sympy, ruamel.yaml.clib, psutil, protobuf, packaging, numpy, networkx, MarkupSafe, humanfriendly, fsspec, filelock, scipy, ruamel.yaml, opencv-python, onnx, jinja2, fast-histogram, coloredlogs, torch, onnxruntime, onnxoptimizer, rknn-toolkit2
+Successfully installed MarkupSafe-2.1.5 coloredlogs-15.0.1 fast-histogram-0.13 filelock-3.16.1 flatbuffers-25.12.19 fsspec-2025.3.0 humanfriendly-10.0 jinja2-3.1.6 mpmath-1.3.0 networkx-3.1 numpy-1.24.4 onnx-1.16.1 onnxoptimizer-0.2.7 onnxruntime-1.19.2 opencv-python-5.0.0.93 packaging-26.2 protobuf-3.20.3 psutil-7.2.2 rknn-toolkit2-2.3.2 ruamel.yaml-0.18.16 ruamel.yaml.clib-0.2.8 scipy-1.10.1 sympy-1.13.3 torch-2.2.0 tqdm-4.70.0 typing-extensions-4.13.2
+EXIT_CODE=0
+```

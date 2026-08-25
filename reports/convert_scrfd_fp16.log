@@ -1,0 +1,64 @@
+# SCRFD det_2.5g.onnx → rv1126b FP16 转换实测（TASK 14）
+- 时间: 2026-08-25T04:17:23+00:00
+- 机器: aarch64 Ubuntu 20.04 python3.8 + venv(rknn-toolkit2 2.3.2, opencv 4.10.0.84)
+- 命令: .venv-rknn/bin/python3 tools/convert_rknn.py --model models_src/det_2.5g.onnx --output rknn/scrfd_2.5g_rv1126b_fp16.rknn --target-platform rv1126b --no-quantization --input-shape input.1:1,3,640,640
+```
+I rknn-toolkit2 version: 2.3.2
+[1;33mW[0m [1;33mload_onnx: If you don't need to crop the model, don't set 'inputs'/'input_size_list'/'outputs'![0m
+[convert_rknn] 运行平台: aarch64, python 3.8.10
+[convert_rknn] ⚠ 注意：模型转换官方完整支持的是 x86_64 PC。
+  aarch64 仅 rknn-toolkit2>=2.3.0 起有 arm64 wheel 且限特定 python 版本；
+  本机实测安装/转换结果见 reports/scrfd_rknn_validation.md。
+  若下一步 import rknn 失败，请在 x86_64 PC（或 Mac Docker amd64）执行：
+  python3 tools/convert_rknn.py --model <onnx> --output <rknn> \
+      --target-platform rv1126b --dataset <校准列表.txt>
+[convert_rknn] config: {'target_platform': 'rv1126b'}
+[convert_rknn] 加载 ONNX: models_src/det_2.5g.onnx
+[convert_rknn] 固定输入 shape: ['input.1'] -> [[1, 3, 640, 640]]
+I Loading :   0%|                                                           | 0/124 [00:00<?, ?it/s]I Loading : 100%|█████████████████████████████████████████████| 124/124 [00:00<00:00, 119809.65it/s]
+[1;33mW[0m [1;33mload_onnx: The config.mean_values is None, zeros will be set for input 0![0m
+[1;33mW[0m [1;33mload_onnx: The config.std_values is None, ones will be set for input 0![0m
+[convert_rknn] build: do_quantization=False dataset=None
+I OpFusing 0:   0%|                                                         | 0/100 [00:00<?, ?it/s]I OpFusing 0:  71%|████████████████████████████████▋             | 71/100 [00:00<00:00, 3551.02it/s]I OpFusing 0:  73%|█████████████████████████████████▌            | 73/100 [00:00<00:00, 3601.36it/s]I OpFusing 0:  82%|█████████████████████████████████████▋        | 82/100 [00:00<00:00, 3737.71it/s]I OpFusing 0:  84%|██████████████████████████████████████▋       | 84/100 [00:00<00:00, 3798.00it/s]I OpFusing 0:  93%|██████████████████████████████████████████▊   | 93/100 [00:00<00:00, 3923.50it/s]I OpFusing 0:  95%|███████████████████████████████████████████▋  | 95/100 [00:00<00:00, 3978.30it/s]I OpFusing 0:  72%|█████████████████████████████████             | 72/100 [00:00<00:00, 1870.68it/s]I OpFusing 0:  83%|██████████████████████████████████████▏       | 83/100 [00:00<00:00, 2069.27it/s]I OpFusing 0:  93%|██████████████████████████████████████████▊   | 93/100 [00:00<00:00, 2234.78it/s]I OpFusing 0: 100%|█████████████████████████████████████████████| 100/100 [00:00<00:00, 1602.22it/s]I OpFusing 1 :   0%|                                                        | 0/100 [00:00<?, ?it/s]I OpFusing 1 :  18%|████████▎                                     | 18/100 [00:00<00:00, 261.69it/s]I OpFusing 1 :  38%|█████████████████▍                            | 38/100 [00:00<00:00, 535.99it/s]I OpFusing 1 :  50%|███████████████████████                       | 50/100 [00:00<00:00, 691.57it/s]I OpFusing 1 : 100%|█████████████████████████████████████████████| 100/100 [00:00<00:00, 996.03it/s]I OpFusing 0 :   0%|                                                        | 0/100 [00:00<?, ?it/s]I OpFusing 0 : 100%|█████████████████████████████████████████████| 100/100 [00:00<00:00, 868.49it/s]I OpFusing 1 :   0%|                                                        | 0/100 [00:00<?, ?it/s]I OpFusing 1 : 100%|█████████████████████████████████████████████| 100/100 [00:00<00:00, 791.64it/s]I OpFusing 2 :   0%|                                                        | 0/100 [00:00<?, ?it/s]I OpFusing 2 : 100%|█████████████████████████████████████████████| 100/100 [00:00<00:00, 775.64it/s]I OpFusing 2 : 100%|█████████████████████████████████████████████| 100/100 [00:00<00:00, 252.01it/s]
+I rknn building ...
+I rknn building done.
+
+
+
+
+Traceback (most recent call last):
+  File "tools/convert_rknn.py", line 162, in <module>
+    sys.exit(main())
+  File "tools/convert_rknn.py", line 150, in main
+    ret = rknn.export(args.output)
+AttributeError: 'RKNN' object has no attribute 'export'
+EXIT_CODE=1
+```
+
+# 重跑（修复 export → export_rknn 后）
+- 时间: 2026-08-25T04:18:05+00:00
+```
+I rknn-toolkit2 version: 2.3.2
+[1;33mW[0m [1;33mload_onnx: If you don't need to crop the model, don't set 'inputs'/'input_size_list'/'outputs'![0m
+[convert_rknn] 运行平台: aarch64, python 3.8.10
+[convert_rknn] ⚠ 注意：模型转换官方完整支持的是 x86_64 PC。
+  aarch64 仅 rknn-toolkit2>=2.3.0 起有 arm64 wheel 且限特定 python 版本；
+  本机实测安装/转换结果见 reports/scrfd_rknn_validation.md。
+  若下一步 import rknn 失败，请在 x86_64 PC（或 Mac Docker amd64）执行：
+  python3 tools/convert_rknn.py --model <onnx> --output <rknn> \
+      --target-platform rv1126b --dataset <校准列表.txt>
+[convert_rknn] config: {'target_platform': 'rv1126b'}
+[convert_rknn] 加载 ONNX: models_src/det_2.5g.onnx
+[convert_rknn] 固定输入 shape: ['input.1'] -> [[1, 3, 640, 640]]
+[1;33mW[0m [1;33mload_onnx: The config.mean_values is None, zeros will be set for input 0![0m
+[1;33mW[0m [1;33mload_onnx: The config.std_values is None, ones will be set for input 0![0m
+[convert_rknn] build: do_quantization=False dataset=None
+I rknn building ...
+I rknn building done.
+
+
+
+
+[convert_rknn] ✓ 导出成功: rknn/scrfd_2.5g_rv1126b_fp16.rknn （target=rv1126b, quantization=False）
+EXIT_CODE=0
+```

@@ -16,3 +16,13 @@ reference/qt_basic/
 # 暂存区（安装包、与板子互传的临时文件）
 downloads/
 transfer/
+
+# NPU 模型部署/转换产物（TASK 13/14）：rknn 成品与转换中间产物不入库
+# （已跟踪的 projects/ai_host/models/*、reference/ai_facedet/* 留档文件不受影响；
+#   models_src/ 下的 onnx 源按任务约定保留入库）
+models/*.rknn
+rknn/*
+!rknn/.gitkeep
+
+# rknn-toolkit2 本地虚拟环境（TASK 14 尝试用，不入库）
+.venv-rknn/
