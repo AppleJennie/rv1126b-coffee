@@ -8,9 +8,20 @@
 #   4. 订单排队，逐单驱动机械臂主控 fsm.py（--simulate 时用内置仿真时间线）
 #
 # 运行：
-#   python3 kiosk_server.py --simulate          # 无硬件仿真（开发调试用）
+#   python3 kiosk_server.py --simulate          # 无硬件仿真（开发调试用，内置 19s 时间线）
 #   python3 kiosk_server.py                     # 真机：调用 ../coffee_fsm/fsm.py run
 #   python3 kiosk_server.py --port 8080 --host 0.0.0.0 --timeout 600
+#   python3 kiosk_server.py --mode SIM                            # TASK 27：制作后端切到
+#   python3 kiosk_server.py --mode HYBRID [--scenario xx.yaml]    # cafe_fsm.py 子进程，
+#                                                                 # 解析 [EVENT] JSON 驱动 SSE
+#
+# --mode {SIM,HYBRID,REAL}（TASK 27 模式机制）：
+#   指定后每单 fork ../coffee_fsm/cafe_fsm.py make --drink <id> --order-id <oid>
+#   --mode <mode> [--scenario <yaml>]，逐行解析 stdout 的 [EVENT] {json}：
+#   state 事件映射到屏幕 4 步进度，brew_tick 直接提供 remain_sec，
+#   result 事件（completed/failed/estop）决定 done/error。HYBRID 的设备真/假
+#   配置由 cafe_fsm 读 projects/coffee_fsm/config.json 的 devices 段，kiosk 只透传 --mode。
+#   不填 --mode 时保持旧行为：--simulate 内置时间线 / 真机 fsm.py 日志正则解析。
 #
 # API 一览（详见 docs/04-WiFi与网页通讯设计.md）：
 #   GET  /                 -> 点单屏页面
@@ -47,6 +58,7 @@ HTML_PATH = os.path.join(BASE_DIR, "..", "ui_prototype", "coffee_kiosk.html")
 MENU_PATH = os.path.join(BASE_DIR, "..", "ai_host", "menu.json")
 FSM_DIR = os.path.join(BASE_DIR, "..", "coffee_fsm")
 FSM_PY = os.path.join(FSM_DIR, "fsm.py")
+CAFE_FSM_PY = os.path.join(FSM_DIR, "cafe_fsm.py")
 
 # 屏幕制作步骤与机械臂 FSM 状态的映射（真机模式解析 fsm.py 日志用）
 # 屏幕步骤：取杯 -> 磨豆 -> 冲泡 -> 出品
@@ -56,6 +68,16 @@ STATE_TO_STEP = {
     "PRESS_GRINDER": 1, "POUR_GROUNDS": 1,
     "PRESS_BREWER": 2, "WAIT_BREW": 2,
     "SERVE": 3,
+}
+# cafe_fsm.py（--mode 模式）状态 -> 屏幕步骤的映射（TASK 27）。
+# 未列出的状态不推 progress：ORDER_RECEIVED（起步阶段）、RECOVERY（保持当前步骤）、
+# COMPLETE/ERROR/EMERGENCY_STOP/IDLE（由 result 事件统一收尾）。
+CAFE_STATE_TO_STEP = {
+    "CHECK_SYSTEM": 0, "CHECK_CUP": 0, "PICK_CUP": 0, "MOVE_TO_MACHINE": 0,
+    "GRIND": 1,
+    "BREW": 2, "WAIT_BREW": 2,
+    "PICK_FINISHED_DRINK": 3, "MOVE_TO_SERVE": 3, "SERVE": 3,
+    "WAIT_CUSTOMER_PICKUP": 3,
 }
 # 仿真模式每步耗时（秒）
 SIM_STEP_SEC = [3, 5, 8, 3]
@@ -110,9 +132,12 @@ class OrderManager:
     """订单状态机 + 单队列逐单制作（只有一条机械臂，不能并行）。
     只管订单与调度，不碰硬件；machine / current / 队列的读写全部在 self._lock 内进行。"""
 
-    def __init__(self, bus_events, simulate=False, menu=None, make_timeout=MAKE_TIMEOUT_SEC):
+    def __init__(self, bus_events, simulate=False, menu=None, make_timeout=MAKE_TIMEOUT_SEC,
+                 cafe_mode=None, scenario=None):
         self.events = bus_events
         self.simulate = simulate
+        self.cafe_mode = cafe_mode    # TASK 27：SIM/HYBRID/REAL；None=旧行为（simulate/fsm.py）
+        self.scenario = scenario      # 故障注入场景 yaml，仅 cafe_mode 下透传给 cafe_fsm.py
         self.menu = menu or {}
         self.make_timeout = make_timeout
         self._lock = threading.Lock()
@@ -158,6 +183,7 @@ class OrderManager:
                 "qty": qty,
                 "total": self._price_of(drink, opts, qty),
                 "state": "queued",
+                "_drink_id": drink["id"],  # cafe_fsm.py --drink 用（内部字段不对外）
                 "_step_index": 0,      # 制作进度（ETA 折算用，内部字段不对外）
                 "_step_ts": None,      # 进入当前步骤的时刻
                 "_ready_ts": None,     # 进入 ready 的时刻（超时归档用）
@@ -268,7 +294,9 @@ class OrderManager:
             self._publish_state(order)
             log("WORK", f"开始制作 #{order['order_id']}")
             try:
-                if self.simulate:
+                if self.cafe_mode:
+                    self._make_cafe_fsm(order)
+                elif self.simulate:
                     self._make_simulated(order)
                 else:
                     self._make_real(order)
@@ -361,6 +389,82 @@ class OrderManager:
         if m and last_step == 2:
             self._progress(order, 2, remain_sec=int(m.group(1)))
         return last_step
+
+    # ---------- TASK 27：cafe_fsm.py 子进程后端（--mode 指定时启用） ----------
+    def _make_cafe_fsm(self, order):
+        """每单 fork cafe_fsm.py make，解析 stdout 的 [EVENT] {json} 驱动进度。
+        事件契约（见 cafe_fsm.py 头注释）：
+          {"type":"state",...}     状态转换，CAFE_STATE_TO_STEP 映射到屏幕步骤
+          {"type":"brew_tick",...} 冲泡倒计时，remain_sec 直接用作屏幕剩余秒数
+          {"type":"result",...}    completed/failed/estop，决定本单成败
+        整体超时骨架复用 _make_real：超过 make_timeout 秒杀子进程按失败处理，
+        try/finally 保证任何路径下子进程都被回收、不变僵尸。"""
+        cmd = [sys.executable, CAFE_FSM_PY, "make",
+               "--drink", str(order["_drink_id"]),
+               "--order-id", str(order["order_id"]),
+               "--mode", self.cafe_mode]
+        if self.scenario:                        # 仅用户显式给了 --scenario 才传
+            cmd += ["--scenario", self.scenario]
+        log("CAFE", f"#{order['order_id']} 启动: " + " ".join(cmd))
+        proc = subprocess.Popen(
+            cmd, cwd=FSM_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
+        deadline = time.monotonic() + self.make_timeout
+        ctx = {"last_step": -1, "result": None}  # result=收到的 result 事件 dict
+        try:
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0:
+                    raise TimeoutError(f"制作超过 {self.make_timeout}s 超时，已强制终止")
+                r, _, _ = select.select([proc.stdout], [], [], min(1.0, remain))
+                if r:
+                    line = proc.stdout.readline()
+                    if not line:               # EOF：子进程关闭了输出
+                        break
+                    self._parse_cafe_event(order, line, ctx)
+                elif proc.poll() is not None:  # 进程已退出，读干残留输出后收尾
+                    for line in proc.stdout:
+                        self._parse_cafe_event(order, line, ctx)
+                    break
+            rc = proc.wait(timeout=max(1.0, deadline - time.monotonic()))
+        finally:
+            if proc.poll() is None:            # 超时/异常路径：杀掉并回收子进程
+                proc.kill()
+                proc.wait()
+        result = ctx["result"]
+        if result and result.get("result") != "completed":
+            # failed/estop：message 用 note（失败原因），缺省退化为 state
+            detail = result.get("note") or result.get("state") or "制作失败"
+            raise RuntimeError(f"{detail}（{result.get('result')}@{result.get('state', '?')}）")
+        if rc != 0:
+            raise RuntimeError(f"制作流程异常退出 rc={rc}（mode={self.cafe_mode}，详见服务端日志）")
+
+    def _parse_cafe_event(self, order, line, ctx):
+        """解析一行 cafe_fsm.py 输出并驱动进度，状态记在 ctx（last_step/result）。
+        非 [EVENT] 行是 cafe_fsm 的人类可读日志，原样转发到 kiosk 日志便于排查。"""
+        line = line.rstrip()
+        if not line.startswith("[EVENT] "):
+            if line:
+                log("CAFE", line)
+            return
+        try:
+            ev = json.loads(line[len("[EVENT] "):])
+        except ValueError:
+            log("CAFE", f"无法解析的事件行（忽略）: {line}")
+            return
+        etype = ev.get("type")
+        if etype == "state":
+            step = CAFE_STATE_TO_STEP.get(ev.get("state"))
+            if step is not None and step != ctx["last_step"]:
+                ctx["last_step"] = step
+                self._progress(order, step)
+        elif etype == "brew_tick":
+            ctx["last_step"] = 2
+            self._progress(order, 2, remain_sec=ev.get("remain_sec"))
+        elif etype == "result":
+            ctx["result"] = ev
+            log("CAFE", f"#{order['order_id']} 结果 {ev.get('result')}"
+                        f"@{ev.get('state')} {ev.get('note', '')}".rstrip())
 
 
 # =====================================================================
@@ -484,23 +588,39 @@ def main():
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--simulate", action="store_true", help="仿真制作流程（无硬件）")
+    ap.add_argument("--mode", choices=("SIM", "HYBRID", "REAL"), default=None,
+                    help="TASK 27：制作后端切换为 cafe_fsm.py 子进程（解析 [EVENT] JSON "
+                         "驱动进度）；不填=旧行为（--simulate 时间线 / 真机 fsm.py 日志解析）")
+    ap.add_argument("--scenario", default=None,
+                    help="故障注入场景 yaml（键同 config/sim_scenario.yaml），"
+                         "仅配合 --mode 使用，逐单透传给 cafe_fsm.py")
     ap.add_argument("--timeout", type=int, default=MAKE_TIMEOUT_SEC,
                     help="真机模式单杯制作超时秒数，超时杀子进程按失败处理（默认 600）")
     args = ap.parse_args()
+
+    if args.scenario and not args.mode:
+        ap.error("--scenario 需配合 --mode 使用（旧制作后端不支持故障注入）")
 
     with open(MENU_PATH, "r", encoding="utf-8") as f:
         menu = json.load(f)
 
     event_bus = EventBus()
     mgr = OrderManager(event_bus, simulate=args.simulate, menu=menu,
-                       make_timeout=args.timeout)
+                       make_timeout=args.timeout,
+                       cafe_mode=args.mode, scenario=args.scenario)
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     srv.event_bus = event_bus
     srv.order_mgr = mgr
 
-    mode = "仿真" if args.simulate else "真机(调 fsm.py run)"
-    log("HTTP", f"点单屏服务已启动: http://{args.host}:{args.port}/  模式={mode}")
+    if args.mode:
+        backend = f"cafe_fsm.py 子进程（mode={args.mode}"
+        backend += f"，scenario={args.scenario}）" if args.scenario else "）"
+    elif args.simulate:
+        backend = "内置仿真时间线（--simulate 旧路径）"
+    else:
+        backend = "真机(调 fsm.py run)"
+    log("HTTP", f"点单屏服务已启动: http://{args.host}:{args.port}/  制作后端={backend}")
     log("HTTP", f"页面入口 http://<板子IP>:{args.port}/  API: /api/menu /api/order /api/events")
     try:
         srv.serve_forever()
