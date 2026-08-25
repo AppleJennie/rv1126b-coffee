@@ -17,6 +17,8 @@
 #
 # 本模块只做探测与记录，绝不向调用方抛异常（任何一轮出错吞掉记日志）。
 
+import os
+import sys
 import threading
 import time
 import urllib.request
@@ -27,9 +29,24 @@ BUSY_SEC = 300.0             # 单杯制作总时长阈值（长期 BUSY）
 HEALTH_STALE_SEC = 10.0      # 健康巡检线程活性阈值（正常 2s 一轮）
 HTTP_TIMEOUT_SEC = 3.0       # HTTP 自连超时
 
+# TASK 28：log() 转发统一结构化日志（projects/common）；导入失败回退原 print，
+# 与本模块"绝不向调用方抛异常"的原则一致。
+try:
+    _ROOT = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))))
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    from projects.common.structured_log import make_logger as _make_logger
+    _slog = _make_logger("watchdog")
+except Exception:
+    _slog = None
+
 
 def log(tag, msg):
-    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
+    if _slog is not None:
+        _slog(tag, msg)
+    else:
+        print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
 
 
 class Watchdog:

@@ -34,10 +34,17 @@ ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from hardware import DeviceError, DeviceTimeout, EstopError, log            # noqa: E402
+from hardware import DeviceError, DeviceTimeout, EstopError                  # noqa: E402
 from hardware.factory import (SIM_TIME_SCALE, connect_all, default_fsm_config,  # noqa: E402
                               load_scenario, make_devices)
 from recipe import RecipeEngine                                              # noqa: E402
+from projects.common.structured_log import emit as slog_emit, make_logger    # noqa: E402
+
+# TASK 28：统一结构化日志。控制台格式与旧 log() 逐字一致（kiosk 正则契约不破）；
+# 本模块日志归 module=cafe_fsm，设备层日志（hardware/sim 等）仍归 module=hardware。
+log = make_logger("cafe_fsm")
+
+REPORTS_DIR = os.path.join(ROOT, "reports")     # TASK 28：每杯订单报告目录
 
 
 # ---------- 状态定义表（表驱动：handler 经表查名派发，禁止 if state == 长链） ----------
@@ -195,11 +202,15 @@ class CafeFSM:
         self._cup_holding = False     # 当前持杯
         self._correction = None       # 视觉纠偏量 (dx, dy)
         self._in_brew_phase = False   # GRIND/BREW/WAIT_BREW 期间置位，联锁禁止臂动作
+        self._trace = []              # TASK 28：本单 [EVENT] 流水 [(wall_ts, ev)]，订单报告数据源
+        self._t0 = None               # TASK 28：本单开始时刻（epoch 秒）
 
     # ---------- 结构化事件 ----------
 
     def _event(self, **fields):
-        """向 stdout 打一行 [EVENT] {json}（结构化事件总线，取代日志解析）。"""
+        """向 stdout 打一行 [EVENT] {json}（结构化事件总线，取代日志解析）。
+        TASK 28：同时进本单事件流水 _trace，作为 reports/order_*.json 的数据源。"""
+        self._trace.append((time.time(), dict(fields)))
         print("[EVENT] " + json.dumps(fields, ensure_ascii=False), flush=True)
 
     def _transition(self, next_state):
@@ -209,9 +220,66 @@ class CafeFSM:
         self._event(type="state", state=next_state, prev=prev,
                     order_id=self.order_id, ts=round(time.time(), 3))
 
-    def _emit_result(self, result, state, note=""):
-        self._event(type="result", order_id=self.order_id, result=result,
-                    state=state, note=note)
+    def _emit_result(self, result, state, note="", report=None):
+        ev = dict(type="result", order_id=self.order_id, result=result,
+                  state=state, note=note)
+        if report:
+            # TASK 28：订单报告路径透传给 kiosk（它只记日志，不重复生成）
+            ev["report"] = report
+        self._event(**ev)
+
+    # ---------- TASK 28：每杯订单报告（reports/order_<order_id>.json） ----------
+
+    def _write_order_report(self, result, error=""):
+        """从本单 [EVENT] 流水（_trace）汇总订单报告并落盘，返回报告路径（失败 None）。
+        COMPLETE/ERROR/EMERGENCY_STOP 三条终结路径都要调用；报告生成失败只记日志，
+        绝不改变流程结果。内容：order_id / drink / recipe / 各状态进出时间与停留时长 /
+        result / error / 总耗时 / 起止时间戳。"""
+        try:
+            now = time.time()
+            # 状态进出时间：相邻 state 事件配对，exit = 下一 state 事件的到达时刻
+            state_evs = [(ts, ev) for ts, ev in self._trace
+                         if ev.get("type") == "state"]
+            states = []
+            for i, (ts, ev) in enumerate(state_evs):
+                exit_ts = state_evs[i + 1][0] if i + 1 < len(state_evs) else now
+                states.append({
+                    "state": ev.get("state"),
+                    "prev": ev.get("prev"),
+                    "enter_ts": round(ts, 3),
+                    "exit_ts": round(exit_ts, 3),
+                    "duration_sec": round(exit_ts - ts, 3),
+                })
+            report = {
+                "order_id": self.order_id,
+                "drink_id": self.drink_id,
+                "recipe": getattr(self.recipe, "slug", None),
+                "result": result,
+                "error": error or "",
+                "note": self.note,
+                "states": states,
+                "started_at": round(self._t0, 3) if self._t0 else None,
+                "finished_at": round(now, 3),
+                "total_duration_sec": (round(now - self._t0, 3)
+                                       if self._t0 else None),
+            }
+            os.makedirs(REPORTS_DIR, exist_ok=True)
+            path = os.path.join(REPORTS_DIR, f"order_{self.order_id}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            # 结构化日志行：订单维度（order_id/result/error/duration_sec 入 JSONL）
+            slog_emit("cafe_fsm", "ORDER_REPORT",
+                      f"订单 #{self.order_id} 报告已生成: {path}（result={result}）",
+                      level=("INFO" if result == "completed" else "ERROR"),
+                      order_id=self.order_id,
+                      state=states[-1]["state"] if states else None,
+                      duration_sec=report["total_duration_sec"],
+                      result=result, error=error or None)
+            return path
+        except Exception as e:
+            log("ERROR", f"订单报告生成失败（不影响流程结果）: {e}")
+            return None
 
     # ---------- 超时包装与安全工具 ----------
 
@@ -340,12 +408,15 @@ class CafeFSM:
         self._cup_picked = self._cup_placed = self._cup_holding = False
         self._in_brew_phase = False
         self.state = "IDLE"
+        self._t0 = time.time()          # TASK 28：订单报告计时起点
+        self._trace = []
         log("FSM", f"===== 咖啡流程开始（订单 #{order_id}）=====")
         try:
             for name in MAIN_FLOW:
                 self._transition(name)
                 self._exec(name)
-            self._emit_result("completed", "COMPLETE", self.note)
+            report = self._write_order_report("completed")
+            self._emit_result("completed", "COMPLETE", self.note, report=report)
             self._transition("IDLE")
             log("FSM", "===== 咖啡流程完成 =====")
             return 0
@@ -367,7 +438,8 @@ class CafeFSM:
                                        self._state_timeout("ERROR"))
             except Exception as e:
                 log("ERROR", f"收尾动作异常（忽略，继续收尾）: {e}")
-            self._emit_result("failed", "ERROR", cause)
+            report = self._write_order_report("failed", cause)
+            self._emit_result("failed", "ERROR", cause, report=report)
         except Exception:
             pass
         return 1
@@ -382,7 +454,8 @@ class CafeFSM:
                                        self._state_timeout("EMERGENCY_STOP"))
             except Exception as e:
                 log("ESTOP", f"急停收尾异常（忽略）: {e}")
-            self._emit_result("estop", "EMERGENCY_STOP", cause)
+            report = self._write_order_report("estop", cause)
+            self._emit_result("estop", "EMERGENCY_STOP", cause, report=report)
             log("ESTOP", "等待外部 reset，本单终止")
         except Exception:
             pass

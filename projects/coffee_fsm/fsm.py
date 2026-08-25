@@ -17,9 +17,23 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 JOINT_NAMES = ["J1", "J2", "J3", "J4", "J5", "J6"]   # J6 为夹爪
 ARM_JOINTS = JOINT_NAMES[:5]                          # 臂部关节（不含夹爪）
 
+# TASK 28：log() 转发统一结构化日志（projects/common）；导入失败回退原 print。
+# 控制台格式保持 `[HH:MM:SS] [TAG] 消息` 不变（kiosk 真机模式正则解析依赖）。
+try:
+    _ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    from projects.common.structured_log import make_logger as _make_logger
+    _slog = _make_logger("fsm")
+except Exception:
+    _slog = None
+
 
 def log(tag, msg):
-    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
+    if _slog is not None:
+        _slog(tag, msg)
+    else:
+        print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
 
 
 class ArmError(Exception):

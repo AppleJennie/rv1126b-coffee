@@ -1,7 +1,20 @@
 # hardware/base.py —— 设备抽象基类与统一异常
 # 所有硬件适配器（真实/模拟）都实现同一套接口，业务层只依赖这里的抽象。
 
+import os
+import sys
 import time
+
+# TASK 28：log() 转发统一结构化日志（projects/common）；导入失败回退原 print，
+# 任何日志层问题都不许影响硬件层可用性。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+try:
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    from projects.common.structured_log import make_logger as _make_logger
+    _slog = _make_logger("hardware")
+except Exception:
+    _slog = None
 
 
 class DeviceError(Exception):
@@ -65,5 +78,9 @@ class Device:
 
 
 def log(tag, msg):
-    """硬件层统一日志格式（与 fsm.py 风格一致，保持日志解析兼容）。"""
-    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
+    """硬件层统一日志格式（与 fsm.py 风格一致，保持日志解析兼容）。
+    TASK 28：内部转发统一结构化日志——控制台行逐字不变，同时写 logs/*.jsonl。"""
+    if _slog is not None:
+        _slog(tag, msg)
+    else:
+        print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)

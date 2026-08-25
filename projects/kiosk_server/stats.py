@@ -19,11 +19,23 @@
 
 import os
 import sqlite3
+import sys
 import threading
 import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB = os.path.join(BASE_DIR, "data", "kiosk_stats.db")
+
+# TASK 28：log() 转发统一结构化日志（projects/common）；导入失败回退原 print，
+# 与统计库同一红线——日志问题绝不拖垮点单服务。
+try:
+    _ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    from projects.common.structured_log import make_logger as _make_logger
+    _slog = _make_logger("stats")
+except Exception:
+    _slog = None
 
 # 建表 SQL：字段契约见任务书（ts/order_id/drink_id/drink_name/qty/total/
 # duration_sec/result/fail_reason/mode），result 取值 success/failed/cancelled
@@ -45,7 +57,10 @@ CREATE TABLE IF NOT EXISTS orders (
 
 
 def log(tag, msg):
-    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
+    if _slog is not None:
+        _slog(tag, msg)
+    else:
+        print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
 
 
 def _today_start_ts():

@@ -69,6 +69,19 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
+if ROOT not in sys.path:                    # TASK 28：projects/common 结构化日志
+    sys.path.insert(0, ROOT)
+
+# TASK 28：统一结构化日志（控制台行逐字不变，同时写 logs/cafe-YYYYMMDD.jsonl）；
+# 导入失败回退原 print——日志问题不许影响点单服务。
+try:
+    from projects.common.structured_log import make_logger as _make_logger
+    _slog = _make_logger("kiosk")
+except Exception:
+    _slog = None
+
 # TASK 24/26：健康管理器 + 开机自检（同目录模块，无循环依赖）
 from health import HealthManager, run_selfcheck
 # TASK 25：软件看门狗；TASK 35：SQLite 统计；TASK 34：管理后台页模板
@@ -76,7 +89,6 @@ from watchdog import Watchdog
 from stats import Stats
 from admin_page import ADMIN_HTML
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(BASE_DIR, "..", "ui_prototype", "coffee_kiosk.html")
 MENU_PATH = os.path.join(BASE_DIR, "..", "ai_host", "menu.json")
 FSM_DIR = os.path.join(BASE_DIR, "..", "coffee_fsm")
@@ -143,7 +155,11 @@ MAKE_TIMEOUT_SEC = 600  # 真机模式单杯制作超时（--timeout 可改）�
 
 
 def log(tag, msg):
-    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
+    """TASK 28：转发统一结构化日志（控制台行逐字不变，同时写 logs/*.jsonl）。"""
+    if _slog is not None:
+        _slog(tag, msg)
+    else:
+        print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
 
 
 # =====================================================================
@@ -633,8 +649,14 @@ class OrderManager:
             self._progress(order, 2, remain_sec=ev.get("remain_sec"), unified="BREWING")
         elif etype == "result":
             ctx["result"] = ev
-            log("CAFE", f"#{order['order_id']} 结果 {ev.get('result')}"
-                        f"@{ev.get('state')} {ev.get('note', '')}".rstrip())
+            # TASK 28：订单报告路径由 cafe_fsm 生成后随 result 事件透传，
+            # kiosk 只记日志/存订单字段，不重复生成。
+            report = ev.get("report")
+            if report:
+                order["_report_path"] = report
+            log("CAFE", (f"#{order['order_id']} 结果 {ev.get('result')}"
+                         f"@{ev.get('state')} {ev.get('note', '')}").rstrip()
+                        + (f" 报告:{report}" if report else ""))
 
 
 # =====================================================================
