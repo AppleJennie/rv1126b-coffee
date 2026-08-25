@@ -1,0 +1,20 @@
+# 隐私配置（TASK 12）：视觉系统的数据留存红线
+#
+# 默认原则：不留存任何人脸照片与原始视频。
+# 视觉事件流水线（projects/vision/vision_manager.py）在代码路径上
+# 不含任何图像落盘逻辑 —— 下列 save_* 开关即使误开也不会让流水线写图，
+# 加载时只会打印一条告警（详见 docs/PRIVACY_DESIGN.md）。
+# 现场调试存图只允许走独立调试工具（snapshot.py / cup_detect.py -o），
+# 由操作者显式命令行触发，与事件流水线完全隔离。
+#
+# 字段说明：
+#   save_face_images: 是否保存人脸照片（红线，默认 false）
+#   save_raw_video:   是否保存原始视频流（红线，默认 false）
+#   log_fields:       视觉事件日志允许保留的字段白名单，
+#                     事件经 VisionManager.privacy_log() 投影后键集合
+#                     保证是该列表的子集
+
+privacy:
+  save_face_images: false
+  save_raw_video: false
+  log_fields: [face_present, fatigue_score, expression, timestamp]

@@ -34,6 +34,8 @@
 
 每次状态转换 / 触发都向 stdout 打印一行事件 JSON，方便将来对接点单屏
 （mascot 状态机）和日志采集。本模块只输出事件与文案，不直接驱动屏幕。
+带 voice_key 的事件可选地经 AudioManager（audio_manager.py，TASK 32）
+同步播报语音：HostFSM(audio=AudioManager(...))；默认 audio=None 只发事件。
 
 子命令：
   simulate   mock 人脸事件，快速演示全流程（无需摄像头，一次性回放完退出）
@@ -157,7 +159,7 @@ class HostFSM(object):
                  approach_timeout_s=6.0, max_observe_s=90.0,
                  ordering_timeout_s=60.0, making_timeout_s=300.0,
                  serving_timeout_s=60.0, regreet_cooldown_s=180.0,
-                 now_fn=None):
+                 now_fn=None, audio=None):
         self.texts = texts if texts is not None else load_voice_texts()
         self.confirm_polls = confirm_polls
         self.absent_timeout_s = absent_timeout_s
@@ -188,14 +190,26 @@ class HostFSM(object):
         self._last_person_id = None       # 上一场会话的人 id（同人判定用）
         self._last_farewell_ts = -1e9     # 上一次告别时刻（同人时间窗启发式用）
         self._selected = None             # ORDERING/WAITING/SERVING 期间顾客已选饮品名
+        self._audio = audio               # AudioManager（可选；TASK 32）。None=只发事件不播报
 
     # ---- 基础：状态转换与推荐输出 ----
+    def _emit(self, ev):
+        """状态机内部统一事件出口。
+
+        转发模块级 emit()（测试 monkeypatch 它即可拦截全部输出）；
+        若挂了 AudioManager 且事件带 voice_key，同步触发播报——
+        业务侧只发事件，wav 路径只在 audio_manager.py 内部出现。
+        """
+        emit(ev)
+        if self._audio is not None and ev.get('voice_key'):
+            self._audio.play(ev['voice_key'])
+
     def _set_state(self, new_state, **extra):
         """统一的状态转换出口：每次转换都打一行事件 JSON（含 mascot 展示态）。"""
         ev = {'event': 'state', 'from': self.state, 'to': new_state,
               'mascot': _STATE_MASCOT[new_state]}
         ev.update(extra)
-        emit(ev)
+        self._emit(ev)
         self.state = new_state
         self._state_since = self._now()
 
@@ -213,7 +227,7 @@ class HostFSM(object):
             ctx['temp_c'] = w['temp_c']
             ctx['weather_desc'] = w['desc']
         rec = recommend_mod.recommend(ctx)
-        emit({'event': 'recommend', 'mascot': 'recommend',
+        self._emit({'event': 'recommend', 'mascot': 'recommend',
               'drink': rec['drink']['name'], 'drink_id': rec['drink']['id'],
               'price': rec['drink']['price'],
               'reason': rec['reason'], 'tags': rec['tags'],
@@ -258,7 +272,7 @@ class HostFSM(object):
         """→ FAREWELL（瞬时态：告别）→ NO_PERSON。记录同人判定信息。"""
         self._set_state(STATE_FAREWELL, voice_key='goodbye',
                         text=self.texts['goodbye'], reason=reason)
-        emit({'event': 'idle', 'mascot': 'sleep'})
+        self._emit({'event': 'idle', 'mascot': 'sleep'})
         self._last_person_id = self._person_id
         self._person_id = None
         self._selected = None
@@ -274,7 +288,7 @@ class HostFSM(object):
         文案红线：只说「看起来有点累」这类观察性描述，绝不写成医疗诊断。
         """
         fs = fatigue.get('fatigue_score')
-        emit({'event': 'fatigue_tip', 'mascot': 'wake',
+        self._emit({'event': 'fatigue_tip', 'mascot': 'wake',
               'voice_key': 'fatigue_tip', 'text': self.texts['fatigue_tip'],
               'fatigue_score': fs,
               'level': fatigue.get('level'),
@@ -309,7 +323,7 @@ class HostFSM(object):
                 if self._present_streak >= self.confirm_polls:
                     if self._is_same_person_returning(self._person_id, now):
                         # 同人折返：不重复打招呼，直接回到观察态
-                        emit({'event': 'skip_greet', 'mascot': 'wake',
+                        self._emit({'event': 'skip_greet', 'mascot': 'wake',
                               'person_id': self._person_id,
                               'cooldown_s': self.regreet_cooldown_s})
                         self._enter_observe()
@@ -331,7 +345,7 @@ class HostFSM(object):
                 if (not self._smile_bonus_done
                         and smile >= self.smile_bonus_threshold):
                     self._smile_bonus_done = True
-                    emit({'event': 'smile_bonus', 'mascot': 'happy',
+                    self._emit({'event': 'smile_bonus', 'mascot': 'happy',
                           'voice_key': 'smile_bonus', 'text': self.texts['smile_bonus'],
                           'smile': smile})
                 # 疲劳提示：landmark106 后端给出 fatigue dict，分数够高时每会话提示一次
@@ -345,7 +359,7 @@ class HostFSM(object):
                 if (not self._hesitate_done
                         and now - self._observe_since >= self.hesitate_after_s):
                     self._hesitate_done = True
-                    emit({'event': 'hesitate', 'mascot': 'wake',
+                    self._emit({'event': 'hesitate', 'mascot': 'wake',
                           'voice_key': 'hesitate_help', 'text': self.texts['hesitate_help'],
                           'dwell_s': round(now - self._observe_since, 1)})
                 # 超时出口：人在但迟迟不互动 → 主动告别，不无限等待
@@ -364,7 +378,7 @@ class HostFSM(object):
             # 超时出口：迟迟未确认订单 → 播取消文案并告别
             if (self.state == STATE_ORDERING
                     and now - self._state_since >= self.ordering_timeout_s):
-                emit({'event': 'order_timeout', 'mascot': 'wave',
+                self._emit({'event': 'order_timeout', 'mascot': 'wave',
                       'voice_key': 'timeout_cancel', 'text': self.texts['timeout_cancel']})
                 self._do_farewell('ordering_timeout')
 
@@ -372,7 +386,7 @@ class HostFSM(object):
             # 制作中：不处理微笑/疲劳触发，绝不输出推荐（硬约束）
             # 超时出口：制作流程迟迟不回报完成 → 报错并告别
             if now - self._state_since >= self.making_timeout_s:
-                emit({'event': 'making_timeout', 'mascot': 'wake',
+                self._emit({'event': 'making_timeout', 'mascot': 'wake',
                       'wait_s': round(now - self._state_since, 1)})
                 self._do_farewell('making_timeout')
 
@@ -394,11 +408,11 @@ class HostFSM(object):
                 if self.state != STATE_ORDERING:
                     self._last_present = self._now()
                     self._set_state(STATE_ORDERING)
-                emit({'event': 'user_select', 'mascot': 'wake',
+                self._emit({'event': 'user_select', 'mascot': 'wake',
                       'drink_id': ev.get('drink_id'),
                       'drink_name': ev.get('drink_name')})
             else:
-                emit({'event': 'user_select_ignored', 'state': self.state,
+                self._emit({'event': 'user_select_ignored', 'state': self.state,
                       'drink_id': ev.get('drink_id')})
 
         elif etype == 'order_confirmed':
@@ -408,7 +422,7 @@ class HostFSM(object):
                                 drink_id=ev.get('drink_id'),
                                 drink_name=ev.get('drink_name') or self._selected)
             else:
-                emit({'event': 'order_confirmed_ignored', 'state': self.state})
+                self._emit({'event': 'order_confirmed_ignored', 'state': self.state})
 
         elif etype == 'making_done':
             if self.state == STATE_WAITING:
@@ -417,17 +431,17 @@ class HostFSM(object):
                                 text=self.texts['ready_take'],
                                 drink_name=self._selected)
             else:
-                emit({'event': 'making_done_ignored', 'state': self.state})
+                self._emit({'event': 'making_done_ignored', 'state': self.state})
 
         elif etype == 'served':
             # 顾客已取走饮品 → 告别
             if self.state == STATE_SERVING:
                 self._do_farewell('served')
             else:
-                emit({'event': 'served_ignored', 'state': self.state})
+                self._emit({'event': 'served_ignored', 'state': self.state})
 
         else:
-            emit({'event': 'unknown_control', 'type': etype, 'state': self.state})
+            self._emit({'event': 'unknown_control', 'type': etype, 'state': self.state})
 
     def step(self, ev):
         """喂一个事件（人脸事件或控制事件），驱动一次状态机。"""

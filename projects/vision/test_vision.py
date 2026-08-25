@@ -11,10 +11,13 @@
   - 表情接口（TASK 16）：Mock 脚本化 / CPU Haar 可跑 / RKNN 桩抛 NotImplementedError
   - 杯检测（TASK 18）：合成「空台面 / 有杯」两图，背景差分与 Hough 回退都断言
   - VisionManager（TASK 17）：事件去抖、gone 超时、能力开关、demo 脚本事件流
+  - 隐私（TASK 12）：配置加载 / 事件 dict 纯标量 / 日志白名单子集 / 全程零落盘
 """
 
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 
 import cv2  # noqa: F401  （确保板端依赖在本机可用，问题在测试期暴露）
@@ -33,7 +36,7 @@ from cup_presence import CupPresenceDetector  # noqa: E402
 from vision_manager import (  # noqa: E402
     CUP_PRESENT, CUP_REMOVED, HAPPY, MOCK_CUP_ROI, MOCK_FACE_BOX,
     PERSON_LEFT, PERSON_PRESENT, TIRED, MockFrameSource, VisionManager,
-    demo_script, render_mock_frame)
+    demo_script, load_privacy_config, render_mock_frame)
 
 FPS = 5   # 合成场景的虚拟帧率
 
@@ -265,6 +268,75 @@ class TestVisionManager(unittest.TestCase):
         for e, ts in zip(evs, want_ts):
             self.assertAlmostEqual(e['ts'], ts, places=1,
                                    msg='%s 时间戳不符' % e['type'])
+
+
+class TestPrivacy(unittest.TestCase):
+    """TASK 12：隐私配置加载、日志字段白名单、全程零图像落盘。"""
+
+    CUP_CFG = {'cup_background': 'first_frame',
+               'cup': {'roi': MOCK_CUP_ROI, 'min_area': 800}}
+
+    def test_config_defaults_when_file_missing(self):
+        """配置文件缺失 → 回退默认最严：两个 save 开关 False，4 个白名单字段。"""
+        cfg = load_privacy_config('/nonexistent/privacy.yaml')
+        self.assertFalse(cfg['save_face_images'])
+        self.assertFalse(cfg['save_raw_video'])
+        self.assertEqual(set(cfg['log_fields']),
+                         {'face_present', 'fatigue_score',
+                          'expression', 'timestamp'})
+
+    def test_config_loads_repo_file(self):
+        """仓库自带 config/privacy.yaml 能加载，且默认不留存任何图像。"""
+        cfg = load_privacy_config()
+        self.assertFalse(cfg['save_face_images'])
+        self.assertFalse(cfg['save_raw_video'])
+        self.assertIn('timestamp', cfg['log_fields'])
+
+    def test_event_dict_scalar_only(self):
+        """事件回调输出的 dict 只含 type/ts/detail，detail 全是标量/字符串
+        （无图像、无人脸框、无 landmarks 坐标等多余信息）。"""
+        evs = run_manager(demo_script(), self.CUP_CFG)
+        self.assertTrue(evs)
+        for e in evs:
+            self.assertEqual(set(e.keys()), {'type', 'ts', 'detail'})
+            self.assertIsInstance(e['type'], str)
+            self.assertIsInstance(e['ts'], float)
+            for v in e['detail'].values():
+                self.assertIsInstance(v, (int, float, str, bool, type(None)))
+
+    def test_privacy_log_subset_of_whitelist(self):
+        """默认配置下 privacy_log 记录的键集合 ⊆ 允许字段白名单。"""
+        src = MockFrameSource(demo_script(), fps=FPS)
+        vm = VisionManager(src, self.CUP_CFG)
+        vm.run()
+        allowed = set(vm.privacy['log_fields'])
+        recs = [vm.privacy_log(e) for e in vm.poll_events()]
+        self.assertTrue(recs)
+        for r in recs:
+            self.assertLessEqual(set(r.keys()), allowed)
+            self.assertIn('timestamp', r)
+
+    def test_privacy_log_respects_custom_fields(self):
+        """收窄 log_fields 后，记录只保留收窄后的字段。"""
+        src = MockFrameSource([{'dur': 1.0, 'person': True, 'expression': 'happy'}],
+                              fps=FPS)
+        vm = VisionManager(src, privacy_config={'log_fields': ['timestamp']})
+        vm.run()
+        for e in vm.poll_events():
+            self.assertEqual(set(vm.privacy_log(e).keys()), {'timestamp'})
+
+    def test_demo_writes_no_image_files(self):
+        """用子进程在全新临时目录里完整跑一遍 --demo-mock，
+        断言临时目录没有任何新文件生成（不只图像，任何文件都不行）。"""
+        tmp = tempfile.mkdtemp(prefix='vision_privacy_')
+        r = subprocess.run(
+            [sys.executable, os.path.join(_HERE, 'vision_manager.py'),
+             '--demo-mock'],
+            cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=120)
+        self.assertEqual(r.returncode, 0, msg=r.stderr.decode('utf-8', 'replace'))
+        self.assertEqual(os.listdir(tmp), [],
+                         msg='demo 运行后临时目录出现文件: %s' % os.listdir(tmp))
 
 
 if __name__ == '__main__':

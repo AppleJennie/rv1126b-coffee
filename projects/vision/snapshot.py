@@ -2,6 +2,10 @@
 # snapshot.py —— 采图测试工具
 # 用途：验证摄像头能否正常取图，保存一张 JPEG 供查看。
 # 用法：python3 snapshot.py [-d 23] [-W 1920 -H 1080] [-o out.jpg]
+#
+# 隐私红线（TASK 12，见 docs/PRIVACY_DESIGN.md）：本工具是摄像头 bring-up
+# 调试工具，存图只在操作者显式命令行运行时发生；禁止接入视觉事件流水线
+# （VisionManager 链路不落盘任何图像）。
 
 import argparse
 import sys

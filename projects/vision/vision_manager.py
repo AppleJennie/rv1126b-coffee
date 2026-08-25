@@ -24,7 +24,11 @@
 真摄像头可选演示（/dev/videoN）：
   python3 projects/vision/vision_manager.py --demo-real --device 0
 
-隐私红线：默认不保存任何人脸照片/原始视频；合成帧只在内存中生成。
+隐私红线（TASK 12，详见 docs/PRIVACY_DESIGN.md）：
+  本模块（事件流水线）在代码路径上不含任何图像落盘逻辑 —— 没有
+  cv2.imwrite / VideoWriter，帧只在内存中流过即丢。config/privacy.yaml
+  的 save_face_images / save_raw_video 即使误开也只是触发告警，
+  流水线依然不写图；事件日志须经 privacy_log() 投影，只保留白名单字段。
 """
 
 import argparse
@@ -35,6 +39,7 @@ from collections import deque
 
 import cv2
 import numpy as np
+import yaml
 
 # 同目录模块导入兜底（本仓库惯例，同 hardware/vision_cup.py）
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -204,6 +209,43 @@ def _merge_cfg(default, override):
     return out
 
 
+# ---- 隐私配置（TASK 12）----
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+PRIVACY_CONFIG_PATH = os.path.join(_REPO_ROOT, 'config', 'privacy.yaml')
+
+# 默认即最严：不留存任何图像；日志只留白名单字段
+DEFAULT_PRIVACY = {
+    'save_face_images': False,
+    'save_raw_video': False,
+    'log_fields': ['face_present', 'fatigue_score', 'expression', 'timestamp'],
+}
+
+
+def load_privacy_config(path=None):
+    """加载隐私配置（config/privacy.yaml）。
+
+    文件缺失/损坏/结构不对时回退 DEFAULT_PRIVACY（默认最严，永不因
+    配置问题放大留存）。返回 dict，键与 DEFAULT_PRIVACY 一致。
+    """
+    path = path or PRIVACY_CONFIG_PATH
+    cfg = dict(DEFAULT_PRIVACY)
+    cfg['log_fields'] = list(DEFAULT_PRIVACY['log_fields'])
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            doc = yaml.safe_load(f)
+        node = (doc or {}).get('privacy') or {}
+        for k in ('save_face_images', 'save_raw_video'):
+            if k in node:
+                cfg[k] = bool(node[k])
+        if node.get('log_fields'):
+            cfg['log_fields'] = [str(x) for x in node['log_fields']]
+    except Exception as e:
+        print('[privacy] 加载 %s 失败（%s），按默认最严配置运行' % (path, e),
+              file=sys.stderr)
+    return cfg
+
+
 DEFAULT_CONFIG = {
     # 每个能力独立开关
     'capabilities': {'face': True, 'fatigue': True, 'expression': True, 'cup': True},
@@ -224,12 +266,30 @@ class VisionManager(object):
     事件投递两种方式可同时用：
       on_event(cb) 订阅回调；poll_events() 拉取并清空内部队列。
     事件格式：{'type': 六类之一, 'ts': 帧时间戳, 'detail': {...}}。
+
+    privacy_config（TASK 12）：dict（覆盖默认）或 None（读
+    config/privacy.yaml，缺失则默认最严）。事件流水线本身不含任何
+    图像落盘路径，save_* 开关即使为 True 也只触发一条告警。
     """
 
-    def __init__(self, source, config=None, expression_backend=None):
+    def __init__(self, source, config=None, expression_backend=None,
+                 privacy_config=None):
         self.cfg = _merge_cfg(DEFAULT_CONFIG, config)
         self.source = source
         self.caps = self.cfg['capabilities']
+
+        # 隐私配置：默认读 config/privacy.yaml；显式传 dict 则覆盖合并
+        if privacy_config is None:
+            self.privacy = load_privacy_config()
+        else:
+            self.privacy = dict(DEFAULT_PRIVACY)
+            self.privacy['log_fields'] = list(DEFAULT_PRIVACY['log_fields'])
+            self.privacy.update(privacy_config)
+        if self.privacy['save_face_images'] or self.privacy['save_raw_video']:
+            print('[privacy] 警告：save_face_images/save_raw_video 被置为 true，'
+                  '但事件流水线在代码路径上不含图像落盘逻辑，开关不生效；'
+                  '现场调试存图请用独立工具（snapshot.py / cup_detect.py -o）',
+                  file=sys.stderr)
 
         # 人脸检测后端
         self.face_backend = self.cfg['face_backend']
@@ -273,6 +333,37 @@ class VisionManager(object):
         out = list(self._queue)
         self._queue.clear()
         return out
+
+    def privacy_log(self, event):
+        """把事件投影成隐私合规的日志记录（TASK 12）。
+
+        返回 dict 的键集合保证 ⊆ privacy['log_fields']（默认
+        face_present / fatigue_score / expression / timestamp）：
+          PERSON_PRESENT → face_present=True
+          PERSON_LEFT    → face_present=False
+          TIRED          → fatigue_score=闭眼占比（0~1 标量）
+          HAPPY          → expression='happy'
+          CUP_PRESENT/CUP_REMOVED → 仅 timestamp（与人无关，不落其它字段）
+        记录中永远不含图像、人脸框坐标、landmarks 等可识别信息。
+        """
+        fields = set(self.privacy['log_fields'])
+        rec = {}
+        if 'timestamp' in fields:
+            rec['timestamp'] = event['ts']
+        etype = event['type']
+        if etype == PERSON_PRESENT:
+            if 'face_present' in fields:
+                rec['face_present'] = True
+        elif etype == PERSON_LEFT:
+            if 'face_present' in fields:
+                rec['face_present'] = False
+        elif etype == TIRED:
+            if 'fatigue_score' in fields:
+                rec['fatigue_score'] = event['detail'].get('closed_ratio')
+        elif etype == HAPPY:
+            if 'expression' in fields:
+                rec['expression'] = 'happy'
+        return rec
 
     def _emit(self, etype, ts, detail=None):
         e = {'type': etype, 'ts': round(float(ts), 3), 'detail': detail or {}}

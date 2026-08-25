@@ -2,6 +2,10 @@
 # cup_detect.py —— 杯口圆检测
 # 用途：俯视画面中用 HoughCircles 找纸杯杯口圆，输出圆心像素坐标。
 # 用法：python3 cup_detect.py [-d 23] [-o debug.jpg] [--min-r 40] [--max-r 200]
+#
+# 隐私红线（TASK 12，见 docs/PRIVACY_DESIGN.md）：-o 调试图仅在操作者
+# 显式指定时保存，属现场调试手段；禁止接入视觉事件流水线
+# （VisionManager 链路不落盘任何图像）。
 
 import argparse
 import sys

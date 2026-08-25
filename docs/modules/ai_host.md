@@ -25,11 +25,36 @@ host_fsm.py        互动状态机（主程序，含 simulate / run / recommend 
   │                    {drink, reason, tags}；ctx 支持 period/fatigue/expression/
   │                    user_selected/history 等，全可空，兜底必有结果
   ├── menu.json        菜单数据（提取自 ui_prototype/coffee_kiosk.html 的 MENU）
-  ├── voice_manifest.json  语音播报文案清单（key -> 中文文案）
+  ├── voice_manifest.json  语音播报文案清单（key -> 中文文案，音频唯一数据源）
+  ├── audio_manager.py 音频事件管理（TASK 32）：AudioManager.play(event) 统一入口，
+  │                    语义事件/manifest key 双词汇；Mock（默认）/Cmd（aplay/afplay）
+  │                    两后端，缺播放器或缺 wav 自动降级日志播报，永不抛异常
   └── models/          landmark106 后端模型（留档，RV1126B 上板前需重转，见 docs/modules/ai_host-models.md）
 test_host_fsm.py   TASK 10/11 自测：python3 projects/ai_host/test_host_fsm.py
+test_audio_manager.py  TASK 32 自测：python3 projects/ai_host/test_audio_manager.py
 gen_audio_mac.sh   在 Mac 上用 say + afconvert 批量生成 audio/*.wav
 ```
+
+## 音频事件管理（audio_manager.py，TASK 32）
+
+- **数据源唯一**：`voice_manifest.json` 的 key 即语音事件总线，wav 文件名
+  约定 `audio/<key>.wav`；不另造第二份映射文件。
+- **双词汇点播**：`AudioManager.play()` 既收九个语义事件
+  （`GREETING/TIRED_RECOMMEND/HAPPY/ORDER_CONFIRMED/GRINDING/BREWING/
+  READY/GOODBYE/ERROR`，EVENT_MAP 映射到 manifest key；`ERROR` 只是通用
+  故障兜底），也直接收 manifest key（`brew_milk`/`fault_beans`/
+  `timeout_cancel`/`hesitate_help` 四条无语义别名，coffee_fsm 侧直接用）。
+- **后端**：`mock`（默认，打印日志）/ `cmd`（aplay 或 afplay）。
+  CmdAudio 找不到播放器时整机降级、wav 缺失或播放失败时单条降级，
+  都退回 Mock 日志并记 stderr，`play()` 永不抛异常。
+- **wav 生成**：本开发 VM 无中文 TTS，不在此生成 wav。在 Mac 上运行
+  `./gen_audio_mac.sh` 生成 `audio/*.wav` 后拷到板端
+  `/usr/share/ai_host/audio/`；缺文件不影响运行（自动降级）。
+- **wav 路径只允许出现在 audio_manager.py 内部**；业务代码只发带
+  `voice_key` 的事件。`host_fsm.HostFSM(audio=AudioManager(...))` 可选
+  挂钩：事件带 voice_key 时同步播报（默认 None，simulate CLI 行为不变）。
+- 自查：`python3 projects/ai_host/audio_manager.py --list` 打印映射表与
+  wav 就位情况；`--demo [--backend cmd]` 九个事件过一遍。
 
 ## 疲劳检测模块（fatigue.py）
 
