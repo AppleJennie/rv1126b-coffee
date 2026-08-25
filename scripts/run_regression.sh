@@ -68,6 +68,12 @@ run "cafe_fsm 正常单（SIM）" bash -c \
 # 6. 故障注入全套（25 用例：7 类故障 + 安全联锁 + 正常路径 + 场景文件）
 run "故障注入 25 用例" python3 tests/test_fault_injection.py
 
+# 6b. 视觉层 mock 测试（18 用例：VisionManager/疲劳窗/表情/杯检测，全合成帧）
+run "视觉层 mock 测试" python3 projects/vision/test_vision.py
+
+# 6c. AI 店员交互状态机 + 规则推荐（15 用例：去重打招呼/制作中不推荐/违禁词扫描）
+run "AI 店员交互+推荐测试" python3 projects/ai_host/test_host_fsm.py
+
 # 7. 机械臂 MCU 协议：CRC/帧解析/模拟串口全链路
 run "机械臂协议自测" python3 projects/servo_bus/mock_robot_serial.py
 
