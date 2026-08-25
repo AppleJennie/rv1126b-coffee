@@ -345,6 +345,49 @@
   }
   .sys-badge.warn { background: #B26A00; }   /* DEGRADED */
   .sys-badge.bad  { background: #C62828; }   /* OFFLINE / 关键设备离线 */
+
+  /* ============ TASK 33：产品化增量组件（纯 CSS，无外部资源，板子离线可用） ============ */
+  /* 断线重连提示条（SSE onerror 后显示，重连成功隐藏） */
+  .conn-bar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 90; display: none;
+    background: #B26A00; color: #FFF; font-size: 28px; text-align: center; padding: 14px 0;
+  }
+  .conn-bar.show { display: block; }
+  /* 全局异常提示条（ERROR 事件红条，自动隐藏） */
+  .err-bar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 91; display: none;
+    background: var(--red); color: #FFF; font-size: 32px; font-weight: bold;
+    text-align: center; padding: 18px 24px;
+  }
+  .err-bar.show { display: block; }
+  /* AI 推荐卡（菜单页顶部；ai_host 未接入时由模拟开关出静态内容，注释见 JS） */
+  .reco-card {
+    margin: 8px 48px 0; background: #FFF; border: 3px solid var(--caramel);
+    border-radius: 20px; padding: 20px 28px; display: none;
+    align-items: center; gap: 24px; cursor: pointer;
+  }
+  .reco-card.show { display: flex; }
+  .reco-emoji { font-size: 64px; }
+  .reco-title { font-size: 32px; font-weight: bold; }
+  .reco-reason { font-size: 26px; color: var(--brown-mid); margin-top: 6px; }
+  /* 排队信息条（菜单页，数据来自 /api/status queue+eta_sec，不虚构） */
+  .queue-info { padding: 12px 48px 0; font-size: 26px; color: var(--brown-mid); }
+  /* 制作动画：步骤条下方的滑动进度条（纯 CSS keyframes，无 JS 定时器开销） */
+  .brew-anim {
+    width: 60%; height: 16px; background: #EFE6DC; border-radius: 8px;
+    margin-top: 60px; overflow: hidden;
+  }
+  .brew-anim > div {
+    height: 100%; width: 30%; background: var(--caramel); border-radius: 8px;
+    animation: brewSlide 1.6s ease-in-out infinite;
+  }
+  @keyframes brewSlide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  .brew-order-id { font-size: 26px; color: var(--gray); margin-top: 8px; }
+  /* 页脚管理入口（小字，仅联机模式可见） */
+  .admin-link {
+    position: absolute; bottom: 12px; right: 24px; z-index: 51;
+    font-size: 20px; color: var(--gray); text-decoration: none;
+  }
 </style>
 </head>
 <body>
@@ -382,6 +425,11 @@
         <div class="clock" id="clock">--:--:--</div>
       </header>
       <div class="fault-banner" id="fault-banner"></div>
+      <!-- TASK 33：AI 推荐卡（有 recommend 事件时显示真实推荐；ai_host 未接入 kiosk
+           前由 RECOMMEND.demo 开关出静态演示内容，代码注释标明待接） -->
+      <div class="reco-card" id="reco-card"></div>
+      <!-- TASK 33：等待人数与预计等待（数据来自 /api/status queue+eta_sec） -->
+      <div class="queue-info" id="queue-info" style="display:none"></div>
       <nav class="tabs" id="tabs"></nav>
       <div class="menu-grid" id="menu-grid"></div>
     </section>
@@ -428,8 +476,11 @@
       <div class="brew-body">
         <div class="brew-no-label">您的取餐号</div>
         <div class="brew-no" id="brew-no">---</div>
+        <div class="brew-order-id" id="brew-order-id"></div>
         <div class="brew-eta" id="brew-eta">预计等待约 3 分钟</div>
         <div class="brew-steps" id="brew-steps"></div>
+        <!-- TASK 33：制作动画（纯 CSS 滑动条，无外部资源） -->
+        <div class="brew-anim"><div></div></div>
       </div>
     </section>
 
@@ -483,7 +534,13 @@
     <!-- TASK 24：系统健康角标（联机模式由 JS 轮询 /api/health 填充） -->
     <div class="sys-badge" id="sys-badge" style="display:none"></div>
 
+    <!-- TASK 33：断线重连提示条 / 全局异常提示条（SSE 驱动） -->
+    <div class="conn-bar" id="conn-bar">连接中断，正在重连…</div>
+    <div class="err-bar" id="err-bar"></div>
+
     <div class="watermark">原型 Demo</div>
+    <!-- TASK 33/34：管理后台入口（小字页脚，仅联机模式显示） -->
+    <a class="admin-link" id="admin-link" href="/admin" style="display:none">管理后台</a>
   </div>
 </div>
 
@@ -504,9 +561,16 @@ var ORDER = null;                        // 当前订单 { drink, opts, qty, tot
  * ===================================================================== */
 var API = {
   live: location.protocol.indexOf('http') === 0,   // 是否由板子托管
-  es: null                                          // 全局 SSE 连接（原生自动重连）
+  es: null                                          // 全局 SSE 连接
 };
 var brewHandler = null;                // 制作中页注册的进度回调，exit_brew 时清除
+
+/* TASK 9/33：断线重连状态。手动重建 EventSource 实现指数退避
+ * （原生自动重连是固定 3s，退避可减轻板子压力）；因是手动重建，
+ * lastEventId 不自动带，改为经 ?last_id= 回传（服务端也认 Last-Event-ID 头，
+ * curl/浏览器原生重连都覆盖）。重连成功后服务端先发 snapshot 快照，
+ * applySnapshot 据此把页面恢复到一致状态。 */
+var RECONNECT = { delay: 1000, max: 15000, lastId: 0, timer: null };
 
 function apiGet(path) {
   return fetch(path).then(function (r) { return r.json(); });
@@ -519,11 +583,114 @@ function apiPost(path, body) {
   }).then(function (r) { return r.json(); });
 }
 
-/* SSE 事件统一入口：machine/hello 更新机器状态；progress/done/error 驱动制作页 */
+/* TASK 33：全局异常提示条（ERROR 事件红条，6s 自动隐藏） */
+var errBarTimer = null;
+function showErrBar(text) {
+  var el = document.getElementById('err-bar');
+  el.textContent = '⚠ ' + text;
+  el.classList.add('show');
+  if (errBarTimer) clearTimeout(errBarTimer);
+  errBarTimer = setTimeout(function () { el.classList.remove('show'); }, 6000);
+}
+function showConnBar(on) {
+  document.getElementById('conn-bar').classList.toggle('show', !!on);
+}
+
+/* TASK 33：AI 推荐卡。ai_host 尚未与 kiosk 联通（无推荐接口），
+ * 这里留好卡位与两条数据源：
+ *   1) SSE recommend 事件（{type:'recommend', drink_id, reason}）——待 ai_host 接入后启用；
+ *   2) demo 开关出静态演示内容（默认开，便于演示/截图；接入真实推荐后自动被覆盖）。
+ * TODO(待接 ai_host)：推荐数据应由 ai_host 规则引擎经 kiosk 转发 recommend 事件。 */
+var RECOMMEND = { demo: true, live: null };
+function renderReco() {
+  var card = document.getElementById('reco-card');
+  var drink = null, reason = '';
+  if (RECOMMEND.live) {                       // 真实推荐事件优先
+    drink = MENU.filter(function (d) { return d.id === RECOMMEND.live.drink_id; })[0];
+    reason = RECOMMEND.live.reason || '';
+  } else if (RECOMMEND.demo) {                // 模拟数据开关（待接 ai_host）
+    drink = MENU.filter(function (d) { return d.id === 5; })[0] || MENU[0];
+    reason = '今日推荐（演示数据，待接 ai_host）';
+  }
+  if (!drink) { card.classList.remove('show'); return; }
+  card.innerHTML = '<div class="reco-emoji">' + drink.emoji + '</div><div>' +
+    '<div class="reco-title">为你推荐 · ' + drink.cn + ' ¥' + drink.price + '</div>' +
+    '<div class="reco-reason">' + reason + '</div></div>';
+  card.onclick = function () { openCustomize(drink); };
+  card.classList.add('show');
+}
+
+/* TASK 33：等待人数与预计等待（/api/status queue+eta_sec 直接计算，不虚构） */
+function updateQueueInfo(s) {
+  var el = document.getElementById('queue-info');
+  if (!el || !s) return;
+  el.style.display = 'block';
+  var n = s.queue_len || 0;
+  var txt = n ? ('当前排队 ' + n + ' 单') : '当前无需排队';
+  if (s.queue && s.queue.length) {
+    var last = s.queue[s.queue.length - 1];
+    if (last && typeof last.eta_sec === 'number') {
+      // 新订单等待 ≈ 队尾 eta + 一标准杯 19s（SIM_STEP_SEC 合计）
+      txt += ' · 现在下单预计等待约 ' + Math.ceil((last.eta_sec + 19) / 60) + ' 分钟';
+    }
+  }
+  el.textContent = txt;
+}
+function pollStatus() {
+  if (!API.live) return;
+  apiGet('/api/status').then(function (s) { if (s) updateQueueInfo(s); })
+    .catch(function () { /* 服务端不可达时保持现状，下轮再试 */ });
+  setTimeout(pollStatus, 5000);
+}
+
+/* TASK 9/33：断线恢复——重连后首帧 snapshot 快照恢复界面一致状态 */
+function applySnapshot(s) {
+  MACHINE.state = s.machine || 'ok';
+  updateQueueInfo(s);
+  if (currentPage === 'menu') refreshFault();
+  if (!ORDER || !ORDER.id) return;            // 没有进行中的本机订单，无需恢复制作页
+  // 断线期间做好了：恢复取餐页（醒目取杯提示）
+  var ready = (s.ready || []).some(function (o) { return o.order_id === ORDER.id; });
+  if (ready) { if (currentPage !== 'done') showPage('done'); return; }
+  var cur = s.current;
+  if (cur && cur.order_id === ORDER.id) {
+    if (currentPage !== 'brew') showPage('brew');   // 还在制作，恢复制作页
+    return;                                         // 进度由后续 progress 事件继续驱动
+  }
+  var inQueue = (s.queue || []).some(function (o) { return o.order_id === ORDER.id; });
+  if (inQueue) {                              // 还在排队
+    if (currentPage !== 'brew') showPage('brew');
+  } else if (currentPage === 'brew') {        // 既不在制作/排队/待取：断线期间已归档/取消
+    showPage('done');
+  }
+}
+
+/* SSE 事件统一入口：machine/hello/snapshot 更新机器状态与快照恢复；
+ * progress/done/error 驱动制作页（旧契约）；ORDER_* 等统一大写事件（TASK 9）
+ * 与 recommend 推荐事件（TASK 33）按能力消费 */
 function handleServerEvent(ev) {
   if (ev.type === 'hello' || ev.type === 'machine') {
     MACHINE.state = ev.machine || ev.state || 'ok';
     if (currentPage === 'menu') refreshFault();
+    return;
+  }
+  if (ev.type === 'snapshot') {               // TASK 9：断线重连首帧快照
+    applySnapshot(ev);
+    return;
+  }
+  if (ev.type === 'recommend') {              // TASK 33：AI 推荐（待 ai_host 接入）
+    RECOMMEND.live = ev;
+    if (currentPage === 'menu') renderReco();
+    return;
+  }
+  if (ev.type === 'READY') {                  // TASK 9：做好待取餐（醒目取杯提示）
+    if (!ORDER || !ORDER.id || ev.order_id === ORDER.id) {
+      if (currentPage === 'brew') showPage('done');
+    }
+    return;
+  }
+  if (ev.type === 'ERROR') {                  // TASK 9：制作失败红条提示原因
+    showErrBar('制作异常：' + (ev.message || '设备异常'));
     return;
   }
   if (ev.type === 'progress') {
@@ -534,7 +701,8 @@ function handleServerEvent(ev) {
     if (currentPage === 'brew') showPage('done');
     return;
   }
-  if (ev.type === 'error') {                 // 制作失败：提示后回菜单页
+  if (ev.type === 'error') {                 // 旧契约制作失败：红条 + 提示后回菜单页
+    showErrBar('制作失败：' + (ev.message || '设备异常'));
     if (currentPage === 'brew') {
       setMascot('fault', '制作失败：' + (ev.message || '设备异常'));
       pageTimeout(function () { showPage('menu'); }, 3000);
@@ -542,11 +710,31 @@ function handleServerEvent(ev) {
   }
 }
 
+/* TASK 33：断线重连——onerror 后指数退避重建连接（1s/2s/4s…上限 15s），
+ * 重连成功由服务端 snapshot 首帧恢复界面（TASK 9） */
 function apiConnect() {
-  if (!API.live || API.es) return;
-  API.es = new EventSource('/api/events');
-  API.es.onmessage = function (e) {
+  if (!API.live) return;
+  if (API.es) { try { API.es.close(); } catch (e) { /* 忽略 */ } API.es = null; }
+  var url = '/api/events' + (RECONNECT.lastId ? '?last_id=' + RECONNECT.lastId : '');
+  var es = new EventSource(url);
+  API.es = es;
+  es.onopen = function () {
+    RECONNECT.delay = 1000;                   // 连上即重置退避
+    showConnBar(false);
+  };
+  es.onmessage = function (e) {
+    var lid = parseInt(e.lastEventId, 10);    // 服务端为每条事件写 id: 行
+    if (lid > 0) RECONNECT.lastId = lid;
     try { handleServerEvent(JSON.parse(e.data)); } catch (err) { /* 忽略坏帧 */ }
+  };
+  es.onerror = function () {
+    if (API.es !== es) return;                // 旧连接的迟到回调
+    showConnBar(true);
+    try { es.close(); } catch (e2) { /* 忽略 */ }
+    API.es = null;
+    if (RECONNECT.timer) clearTimeout(RECONNECT.timer);
+    RECONNECT.timer = setTimeout(apiConnect, RECONNECT.delay);
+    RECONNECT.delay = Math.min(RECONNECT.delay * 2, RECONNECT.max);   // 指数退避
   };
 }
 
@@ -824,6 +1012,7 @@ function enter_menu() {
   pageInterval(tick, 1000);
 
   refreshFault();
+  renderReco();          // TASK 33：AI 推荐卡（demo 开关或 recommend 事件数据）
 
   renderTabs();
 
@@ -1097,6 +1286,9 @@ function exit_brew() {
 
 function enter_brew() {
   document.getElementById('brew-no').textContent = ORDER.pickupNo;
+  // TASK 33：订单号小字显示（联机模式才有服务端订单号）
+  document.getElementById('brew-order-id').textContent =
+    ORDER.id ? ('订单号 #' + ORDER.id) : '';
 
   if (API.live) {
     // 联机模式：等待并消费服务端 progress 事件；done/error 由全局分发处理
@@ -1193,6 +1385,7 @@ function boot() {
 
 if (API.live) {
   // 联机模式：先拉菜单与机器状态，连上 SSE，再进页面；失败则回退演示模式
+  document.getElementById('admin-link').style.display = 'block';   // TASK 33/34 页脚管理入口
   apiGet('/api/menu').then(function (data) {
     if (data && data.menu && data.menu.length) {
       MENU = data.menu;
@@ -1201,6 +1394,7 @@ if (API.live) {
     }
     apiConnect();
     pollHealth();              // TASK 24：启动健康角标轮询
+    pollStatus();              // TASK 33：排队人数/预计等待轮询
     boot();
   }).catch(function () {
     API.live = false;          // 服务端不可达：回退为纯前端演示
