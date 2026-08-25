@@ -8,6 +8,10 @@
 
 ```
 host_fsm.py        互动状态机（主程序，含 simulate / run / recommend 三个子命令）
+                   状态集：NO_PERSON / PERSON_APPROACH / GREETING / OBSERVE /
+                   RECOMMEND / ORDERING / WAITING / SERVING / FAREWELL；
+                   同人冷却期内不重复打招呼（person_id 或时间窗启发式），
+                   WAITING/SERVING 不输出推荐，各可停留状态均有超时出口
   ├── face_events.py   人脸事件源：poll() -> {present, face_ratio, smile, fatigue, ts}
   │     ├── HaarBackend        CPU，本机可测（正脸级联 + 微笑级联），fatigue 恒为 None
   │     ├── ScrfdBackend       板端 NPU（rknnlite + scrfd.rknn，5 关键点估算微笑）
@@ -17,10 +21,13 @@ host_fsm.py        互动状态机（主程序，含 simulate / run / recommend 
   ├── fatigue.py       疲劳检测：106 关键点 → EAR/MAR/head_down + 2s 个人基线
   │                    + 事件状态机（long_blink/yawn/nod），纯 Python 无 numpy
   ├── weather.py       open-meteo 天气（urllib，5s 超时，失败返回 None 由调用方降级）
-  ├── recommend.py     规则推荐引擎：recommend(ctx) -> {drink, reason, tags}
+  ├── recommend.py     规则推荐引擎：RULES 规则表打分制，recommend(ctx) ->
+  │                    {drink, reason, tags}；ctx 支持 period/fatigue/expression/
+  │                    user_selected/history 等，全可空，兜底必有结果
   ├── menu.json        菜单数据（提取自 ui_prototype/coffee_kiosk.html 的 MENU）
   ├── voice_manifest.json  语音播报文案清单（key -> 中文文案）
   └── models/          landmark106 后端模型（留档，RV1126B 上板前需重转，见 docs/modules/ai_host-models.md）
+test_host_fsm.py   TASK 10/11 自测：python3 projects/ai_host/test_host_fsm.py
 gen_audio_mac.sh   在 Mac 上用 say + afconvert 批量生成 audio/*.wav
 ```
 
@@ -42,9 +49,9 @@ gen_audio_mac.sh   在 Mac 上用 say + afconvert 批量生成 audio/*.wav
 - `fatigue_score` 是 Python 侧新增的连续评分（C 版只有离散状态）：
   `0.6×闭眼进度 + 0.3×哈欠进度 + 0.3×低头进度`，截断到 0~1。
 - 链路：`face_events.py --backend landmark106` 产出 fatigue dict →
-  `host_fsm.py` ENGAGED 状态下 ≥0.6 触发一次 `fatigue_tip` 事件并追加一条
-  提神推荐 → `recommend.py` 的疲劳规则（≥0.6 强推美式/Dirty，0.3~0.6 轻提示；
-  优先级低于极端天气、高于情绪规则）。
+  `host_fsm.py` OBSERVE 状态下 ≥0.6 触发一次 `fatigue_tip` 事件并追加一条
+  提神推荐 → `recommend.py` 的疲劳规则（morning/afternoon 与疲劳组合强推美式，
+  其余时段推美式/Dirty；只跟归一化后的 `possibly_tired` 档位打交道）。
 
 ## 运行示例
 
@@ -104,7 +111,7 @@ stdout 打印一行 JSON，字段含 `mascot`，取值约定：
 - `greet`    进场问候
 - `recommend` 展示推荐
 - `happy`    微笑彩蛋
-- `brewing`  制作中（由点单流程触发，本模块不产生）
+- `brewing`  制作中（进入 WAITING 状态时由本模块产生；点单流程侧也可触发）
 - `wave`     告别
 
 带 `voice_key` 字段的事件对应 `voice_manifest.json` 里的播报文案。
