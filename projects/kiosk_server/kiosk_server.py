@@ -31,7 +31,9 @@
 #                             （队列满返回 409 {ok:false, reason:"queue_full"}）
 #   POST /api/order/cancel -> 请求 {order_id}，仅排队中(queued)可取消；
 #                             制作中拒绝 409 {ok:false, reason:"already_preparing"}
-#   GET  /api/status       -> {machine, queue_len, current, queue[]} 队列快照（含 eta_sec）
+#   GET  /api/status       -> {machine, queue_len, current, queue[], health} 队列快照（含 eta_sec）
+#                             health 为 TASK 24 健康摘要（overall/overall_text/blocking），不动旧字段
+#   GET  /api/health       -> TASK 24：8 项巡检明细 + overall(SYSTEM READY/DEGRADED/OFFLINE)
 #   GET  /api/events       -> SSE 事件流（hello / machine / progress / done / error / order_state）
 #   POST /api/machine      -> {state:"ok|nowater|nobeans"} 维护模拟（将来由水位/豆位传感器驱动）
 #
@@ -52,6 +54,9 @@ import threading
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# TASK 24/26：健康管理器 + 开机自检（同目录模块，无循环依赖）
+from health import HealthManager, run_selfcheck
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(BASE_DIR, "..", "ui_prototype", "coffee_kiosk.html")
@@ -133,11 +138,12 @@ class OrderManager:
     只管订单与调度，不碰硬件；machine / current / 队列的读写全部在 self._lock 内进行。"""
 
     def __init__(self, bus_events, simulate=False, menu=None, make_timeout=MAKE_TIMEOUT_SEC,
-                 cafe_mode=None, scenario=None):
+                 cafe_mode=None, scenario=None, health=None):
         self.events = bus_events
         self.simulate = simulate
         self.cafe_mode = cafe_mode    # TASK 27：SIM/HYBRID/REAL；None=旧行为（simulate/fsm.py）
         self.scenario = scenario      # 故障注入场景 yaml，仅 cafe_mode 下透传给 cafe_fsm.py
+        self.health = health          # TASK 24：HealthManager，关键设备异常时拒绝接新订单
         self.menu = menu or {}
         self.make_timeout = make_timeout
         self._lock = threading.Lock()
@@ -168,6 +174,13 @@ class OrderManager:
         with self._cond:
             if self.machine != "ok":
                 return None, f"machine_{self.machine}"
+            # TASK 24 接单闸门：关键设备（臂/咖啡机/磨豆机/热水）异常禁止接新订单；
+            # 制作中的订单不受影响（闸门只在下单入口）
+            if self.health is not None:
+                ok, reason, detail = self.health.can_accept_order()
+                if not ok:
+                    log("ORDER", f"健康闸门拒单: {detail}")
+                    return None, reason
             active = len(self._queue) + (1 if self.current else 0)
             if active >= QUEUE_MAX:
                 return None, "queue_full"
@@ -515,7 +528,20 @@ class Handler(BaseHTTPRequestHandler):
                 "machine": mgr.machine_state(),
             })
         elif self.path == "/api/status":
-            self._send_json(mgr.snapshot())
+            snap = mgr.snapshot()
+            hm = getattr(self.server, "health_mgr", None)
+            if hm is not None:            # TASK 24：追加健康摘要，不动旧字段
+                snap["health"] = hm.summary()
+            self._send_json(snap)
+        elif self.path == "/api/health":
+            # TASK 24：8 项巡检明细 + 整体 SYSTEM READY/DEGRADED/OFFLINE
+            hm = getattr(self.server, "health_mgr", None)
+            if hm is None:
+                self._send_json({"overall": "UNKNOWN", "overall_text": "SYSTEM UNKNOWN",
+                                 "headline": "SYSTEM UNKNOWN", "blocking": False,
+                                 "items": {}, "ts": int(time.time())})
+            else:
+                self._send_json(hm.snapshot())
         elif self.path == "/api/events":
             self._serve_sse(mgr)
         else:
@@ -561,7 +587,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/order":
             order, err = mgr.place_order(body)
             if err:
-                self._send_json({"ok": False, "reason": err}, 409)
+                resp = {"ok": False, "reason": err}
+                # TASK 24：健康闸门拒单时附明细（旧 reason 契约不变，新字段可选读）
+                if err.startswith("health_"):
+                    hm = getattr(self.server, "health_mgr", None)
+                    if hm is not None:
+                        resp["detail"] = hm.blocking_detail()
+                self._send_json(resp, 409)
             else:
                 self._send_json({"ok": True, "order_id": order["order_id"],
                                  "pickup_no": order["pickup_no"],
@@ -604,14 +636,27 @@ def main():
     with open(MENU_PATH, "r", encoding="utf-8") as f:
         menu = json.load(f)
 
+    # TASK 24/26：健康管理器。健康巡检模式的确定：
+    #   指定 --mode  -> 与制作后端同模式（SIM 时故障注入场景同样生效）
+    #   --simulate   -> 旧路径无硬件，按 SIM 巡检
+    #   其他          -> 旧真机路径（fsm.py），按 REAL 巡检
+    health_mode = args.mode or ("SIM" if args.simulate else "REAL")
+    health_mgr = HealthManager(mode=health_mode, scenario=args.scenario)
+    # TASK 26 开机自检：逐项打印，首轮巡检数据同时作为 /api/health 的初始数据；
+    # 无论 READY 还是 DEMO MODE 都继续启动服务，绝不因自检失败退出
+    verdict = run_selfcheck(health_mgr)
+    health_mgr.start()
+
     event_bus = EventBus()
     mgr = OrderManager(event_bus, simulate=args.simulate, menu=menu,
                        make_timeout=args.timeout,
-                       cafe_mode=args.mode, scenario=args.scenario)
+                       cafe_mode=args.mode, scenario=args.scenario,
+                       health=health_mgr)
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     srv.event_bus = event_bus
     srv.order_mgr = mgr
+    srv.health_mgr = health_mgr
 
     if args.mode:
         backend = f"cafe_fsm.py 子进程（mode={args.mode}"
@@ -620,7 +665,7 @@ def main():
         backend = "内置仿真时间线（--simulate 旧路径）"
     else:
         backend = "真机(调 fsm.py run)"
-    log("HTTP", f"点单屏服务已启动: http://{args.host}:{args.port}/  制作后端={backend}")
+    log("HTTP", f"点单屏服务已启动: http://{args.host}:{args.port}/  制作后端={backend}  自检={verdict}")
     log("HTTP", f"页面入口 http://<板子IP>:{args.port}/  API: /api/menu /api/order /api/events")
     try:
         srv.serve_forever()

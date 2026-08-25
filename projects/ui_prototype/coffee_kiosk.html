@@ -335,6 +335,16 @@
     transition: opacity 0.25s, transform 0.25s;     /* 克制的淡入+滑动，<=300ms */
   }
   .mascot-bubble.show { opacity: 1; transform: translateX(0); }
+
+  /* TASK 24：系统健康角标（右上角，轮询 /api/health，仅联机模式显示） */
+  .sys-badge {
+    position: absolute; top: 14px; right: 18px; z-index: 60;
+    padding: 8px 18px; border-radius: 999px;
+    font-size: 20px; line-height: 1.2; color: #FFF;
+    background: #2E7D32; opacity: 0.88; pointer-events: none;
+  }
+  .sys-badge.warn { background: #B26A00; }   /* DEGRADED */
+  .sys-badge.bad  { background: #C62828; }   /* OFFLINE / 关键设备离线 */
 </style>
 </head>
 <body>
@@ -470,6 +480,9 @@
       <div class="mascot-bubble" id="mascot-bubble"></div>
     </div>
 
+    <!-- TASK 24：系统健康角标（联机模式由 JS 轮询 /api/health 填充） -->
+    <div class="sys-badge" id="sys-badge" style="display:none"></div>
+
     <div class="watermark">原型 Demo</div>
   </div>
 </div>
@@ -535,6 +548,21 @@ function apiConnect() {
   API.es.onmessage = function (e) {
     try { handleServerEvent(JSON.parse(e.data)); } catch (err) { /* 忽略坏帧 */ }
   };
+}
+
+/* TASK 24：系统健康角标，每 3s 轮询 /api/health；
+ * READY 显示 SYSTEM READY，关键设备离线显示 "X Offline"（headline 由服务端给出） */
+function pollHealth() {
+  if (!API.live) return;
+  apiGet('/api/health').then(function (h) {
+    var el = document.getElementById('sys-badge');
+    if (!el || !h) return;
+    el.style.display = 'block';
+    el.textContent = h.headline || h.overall_text || 'SYSTEM ?';
+    el.className = 'sys-badge' + (h.overall === 'READY' ? '' :
+      (h.overall === 'OFFLINE' ? ' bad' : ' warn'));
+  }).catch(function () { /* 服务端不可达时保持现状，下轮再试 */ });
+  setTimeout(pollHealth, 3000);
 }
 
 /* =====================================================================
@@ -1172,6 +1200,7 @@ if (API.live) {
       MACHINE.state = data.machine || 'ok';
     }
     apiConnect();
+    pollHealth();              // TASK 24：启动健康角标轮询
     boot();
   }).catch(function () {
     API.live = false;          // 服务端不可达：回退为纯前端演示
